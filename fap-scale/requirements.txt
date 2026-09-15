@@ -1,0 +1,12 @@
+numpy
+pandas
+scipy
+scikit-learn
+statsmodels
+PyWavelets
+hurst
+xgboost
+tensorflow          # optional: without it the LSTM falls back to an MLP ("LSTM-lite")
+matplotlib
+pytest
+lightgbm            # Person B
