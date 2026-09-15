@@ -11,6 +11,7 @@ Ties together:
 
 import sys
 from typing import Dict, List, Any
+import numpy as np
 
 # Local package imports
 from data_gen.synthetic_data import (

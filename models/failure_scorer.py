@@ -5,7 +5,7 @@ Computes composite health metrics (CPU Pressure Index - CPI, Thermal Trend Score
 and predicts node failure probability Pfail(i) using LightGBM (or sklearn HistGradientBoosting fallback).
 """
 
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Optional
 import numpy as np
 import pandas as pd
 

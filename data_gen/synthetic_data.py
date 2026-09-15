@@ -131,7 +131,7 @@ def generate_node_telemetry(
                 degrad = min(1.0, (w - num_windows // 3) / (num_windows * 0.5))
                 cpu_util = min(99.0, st["base_cpu"] + degrad * 45.0 + np.random.normal(0, 3))
                 run_q = st["base_q"] + degrad * 20.0 + np.random.normal(0, 1)
-                cs_rate = st["cs"] if "cs" in st else st["base_cs"] + degrad * 6000.0 + np.random.normal(0, 200)
+                cs_rate = st["base_cs"] + degrad * 6000.0 + np.random.normal(0, 200)
 
                 # Thermal rise (up to TDP limit or thermal throttling threshold ~95°C)
                 latest_temp = min(98.0, st["base_temp"] + degrad * 40.0 + np.random.normal(0, 1.5))
