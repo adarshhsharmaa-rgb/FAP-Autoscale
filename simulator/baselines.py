@@ -30,6 +30,9 @@ class ReactiveHPAScaler:
         current_load: float,
         cluster_telemetry: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
+        if not cluster_telemetry:
+            return {"strategy": "Reactive-HPA", "target_replicas": self.current_replicas, "selected_nodes": []}
+
         avg_cpu = float(np.mean([t.get("cpu_utilization", 30.0) for t in cluster_telemetry]))
 
         # Reactive formula: desired = ceil(current_replicas * (avg_cpu / target_cpu))
@@ -72,6 +75,9 @@ class LSTMRoundRobinScaler:
         workload_window: List[float],
         cluster_telemetry: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
+        if not cluster_telemetry:
+            return {"strategy": "LSTM-RoundRobin", "predicted_load": 0.0, "target_replicas": 1, "selected_nodes": []}
+
         series = np.array(workload_window, dtype=float)
         pred_load = self.forecaster.predict_next(series)
         target_replicas = max(1, math.ceil(pred_load / self.replica_capacity))

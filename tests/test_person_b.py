@@ -3,13 +3,10 @@ Verification Test Suite for Person B (Node Health & Interference) and Repository
 """
 
 import unittest
-import numpy as np
-import pandas as pd
 
 from data_gen.synthetic_data import (
     generate_workload_time_series,
     generate_node_telemetry,
-    extract_single_node_telemetry
 )
 from models.failure_scorer import (
     NodeFailureScorer,
@@ -21,10 +18,8 @@ from models.interference import (
     InterferenceMatrix,
     get_interference
 )
-from models.pattern_classifier import classify_workload_pattern
 from models.forecasters import classify_and_forecast
-from fusion.fusion_engine import FusionEngine, compute_node_score, calculate_replicas
-from simulator.baselines import ReactiveHPAScaler, LSTMRoundRobinScaler
+from fusion.fusion_engine import compute_node_score, calculate_replicas
 
 
 class TestPersonBAndSkeleton(unittest.TestCase):

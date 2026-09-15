@@ -10,7 +10,7 @@ Computes 4 time-series features:
 Classifies workload into 'periodic', 'bursty', or 'hybrid'.
 """
 
-from typing import Dict, Any, Union
+from typing import Union
 import numpy as np
 import pandas as pd
 
@@ -39,7 +39,7 @@ def compute_cv(series: np.ndarray) -> float:
     mean = np.mean(series)
     if abs(mean) < 1e-6:
         return 0.0
-    return float(np.std(series) / mean)
+    return float(np.std(series) / abs(mean))
 
 
 def compute_hurst_exponent(series: np.ndarray) -> float:
@@ -87,10 +87,15 @@ def classify_workload_pattern(window_data: Union[np.ndarray, pd.Series, list]) -
     hurst = compute_hurst_exponent(series)
     wavelet_ratio = compute_wavelet_energy(series)
 
-    # Classification logic
-    if cv > 0.4 and peaks < 2:
+    # Classification logic using all 4 features
+    # High CV + few autocorr peaks + low hurst = bursty (random spikes, no long-range structure)
+    if cv > 0.4 and peaks < 2 and hurst < 0.55:
         return "bursty"
-    elif peaks >= 2 and cv < 0.35:
+    # Multiple autocorr peaks + low CV + high wavelet low-freq energy = periodic
+    elif peaks >= 2 and cv < 0.35 and wavelet_ratio > 0.6:
+        return "periodic"
+    # Strong long-range correlation alone also indicates periodic
+    elif hurst > 0.65 and peaks >= 1:
         return "periodic"
     else:
         return "hybrid"

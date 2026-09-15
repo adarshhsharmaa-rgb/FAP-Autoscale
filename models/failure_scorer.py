@@ -5,7 +5,7 @@ Computes composite health metrics (CPU Pressure Index - CPI, Thermal Trend Score
 and predicts node failure probability Pfail(i) using LightGBM (or sklearn HistGradientBoosting fallback).
 """
 
-from typing import Dict, List, Any, Union, Optional
+from typing import Dict, List, Any, Optional
 import numpy as np
 import pandas as pd
 
@@ -64,11 +64,8 @@ def calculate_tts(
     temps = np.array(temperature_history[-10:], dtype=float)
     x = np.arange(len(temps))
 
-    # Linear regression slope = cov(x, y) / var(x)
-    if np.var(x) == 0:
-        slope = 0.0
-    else:
-        slope = np.cov(x, temps)[0, 1] / np.var(x)
+    # Linear regression slope via least-squares polyfit
+    slope = np.polyfit(x, temps, 1)[0]
 
     # Normalize by TDP
     tts = slope / max(tdp, 1.0)
@@ -144,6 +141,14 @@ class NodeFailureScorer:
         X_mat = np.array(X)
         y_vec = np.array(y)
 
+        # Guard against single-class data (model can't learn a boundary)
+        unique_classes = np.unique(y_vec)
+        if len(unique_classes) < 2:
+            self._single_class = int(unique_classes[0])
+            self.is_fitted = True
+            return self
+
+        self._single_class = None
         self.model.fit(X_mat, y_vec)
         self.is_fitted = True
         return self
@@ -170,10 +175,18 @@ class NodeFailureScorer:
             heuristic_score = 0.4 * cpi + 0.3 * min(1.0, max(0.0, tts * 5.0)) + 0.2 * (dimm_errs / 5.0) + 0.1 * (1.0 - disk_h)
             return float(np.clip(heuristic_score, 0.01, 0.99))
 
+        # Handle single-class training data (no model was fitted)
+        if getattr(self, "_single_class", None) is not None:
+            return 0.99 if self._single_class == 1 else 0.01
+
         feat_vec = np.array([self.extract_features(telemetry)])
         probs = self.model.predict_proba(feat_vec)[0]
-        # Return probability of class 1 (failure)
-        pfail = probs[1] if len(probs) > 1 else probs[0]
+        # Map to failure class (1) using model.classes_ for correctness
+        classes = list(self.model.classes_)
+        if 1 in classes:
+            pfail = probs[classes.index(1)]
+        else:
+            pfail = 0.0
         return float(np.clip(pfail, 0.001, 0.999))
 
 

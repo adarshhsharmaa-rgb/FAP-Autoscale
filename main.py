@@ -9,8 +9,7 @@ Ties together:
 - Baseline Comparison & Evaluation (Reactive HPA vs LSTM-Only vs FAP-Scale)
 """
 
-import sys
-from typing import Dict, List, Any
+from typing import Dict, Any
 import numpy as np
 
 # Local package imports
@@ -19,16 +18,9 @@ from data_gen.synthetic_data import (
     generate_node_telemetry,
     extract_single_node_telemetry
 )
-from models.failure_scorer import (
-    NodeFailureScorer,
-    score_node_failure,
-    calculate_cpi,
-    calculate_tts
-)
-from models.interference import InterferenceMatrix, get_interference
-from models.pattern_classifier import classify_workload_pattern
-from models.forecasters import classify_and_forecast
-from fusion.fusion_engine import FusionEngine, compute_node_score, calculate_replicas
+from models.failure_scorer import NodeFailureScorer, score_node_failure
+from models.interference import InterferenceMatrix
+from fusion.fusion_engine import FusionEngine
 from simulator.baselines import ReactiveHPAScaler, LSTMRoundRobinScaler
 from results.evaluate import evaluate_experiment_results, plot_evaluation_summary
 

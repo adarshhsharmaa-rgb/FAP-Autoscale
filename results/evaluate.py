@@ -10,15 +10,18 @@ Calculates:
 
 from typing import Dict, List, Any
 import numpy as np
-import pandas as pd
 
 
-def evaluate_experiment_results(decision_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+def evaluate_experiment_results(
+    decision_history: List[Dict[str, Any]],
+    replica_capacity: float = 20.0
+) -> Dict[str, Any]:
     """
     Calculate performance metrics over a simulation run.
 
     Args:
         decision_history: List of window decision dictionaries.
+        replica_capacity: Capacity per replica (req/sec). Default 20.0.
 
     Returns:
         Metrics summary dict:
@@ -48,7 +51,7 @@ def evaluate_experiment_results(decision_history: List[Dict[str, Any]]) -> Dict[
     for entry in decision_history:
         actual_load = entry.get("actual_load", 50.0)
         target_replicas = entry.get("target_replicas", 2)
-        total_capacity = target_replicas * 20.0  # 20 req/sec per replica
+        total_capacity = target_replicas * replica_capacity
 
         replica_counts.append(target_replicas)
 
@@ -79,7 +82,7 @@ def evaluate_experiment_results(decision_history: List[Dict[str, Any]]) -> Dict[
 
 def plot_evaluation_summary(metrics_by_strategy: Dict[str, Dict[str, Any]], save_path: str = "results_plot.png"):
     """
-    Generate bar charts comparing metrics across Reactive-HPA, LSTM-RoundRobin, and FAP-Scale.
+    Generate bar charts comparing metrics across autoscaling strategies.
     """
     try:
         import matplotlib.pyplot as plt
@@ -89,17 +92,21 @@ def plot_evaluation_summary(metrics_by_strategy: Dict[str, Dict[str, Any]], save
         overprov = [metrics_by_strategy[s]["overprovisioning_percent"] for s in strategies]
         unhealthy = [metrics_by_strategy[s]["unhealthy_placements"] for s in strategies]
 
+        # Dynamic color palette that scales with number of strategies
+        default_colors = ["#e74c3c", "#f39c12", "#2ecc71", "#3498db", "#9b59b6"]
+        colors = (default_colors * ((len(strategies) // len(default_colors)) + 1))[:len(strategies)]
+
         fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
 
-        axes[0].bar(strategies, sla, color=["#e74c3c", "#f39c12", "#2ecc71"])
+        axes[0].bar(strategies, sla, color=colors)
         axes[0].set_title("SLA Violations (Lower is Better)")
         axes[0].set_ylabel("Count")
 
-        axes[1].bar(strategies, overprov, color=["#e74c3c", "#f39c12", "#2ecc71"])
+        axes[1].bar(strategies, overprov, color=colors)
         axes[1].set_title("Over-Provisioning % (Lower is Better)")
         axes[1].set_ylabel("Percentage (%)")
 
-        axes[2].bar(strategies, unhealthy, color=["#e74c3c", "#f39c12", "#2ecc71"])
+        axes[2].bar(strategies, unhealthy, color=colors)
         axes[2].set_title("Unhealthy Node Placements (Lower is Better)")
         axes[2].set_ylabel("Count")
 

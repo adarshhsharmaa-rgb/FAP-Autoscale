@@ -11,7 +11,7 @@ Ranks suitable nodes and logs joint autoscaling + placement decisions.
 """
 
 import math
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Any, Optional
 import numpy as np
 
 from models.failure_scorer import NodeFailureScorer, score_node_failure
@@ -109,7 +109,7 @@ class FusionEngine:
                 'pattern_label': str,
                 'predicted_load': float,
                 'target_replicas': int,
-                'ranked_nodes': List[Tuple[str, float, float, float, float]]
+                'ranked_nodes': List[Dict] with keys: node_id, score, pfail, is_score, utilization
             }
         """
         # Step 1: Classify workload & forecast load (Person A call)
@@ -128,7 +128,9 @@ class FusionEngine:
             pfail = score_node_failure(nid, telem, self.failure_scorer)
 
             # Person B: Interference score IS
-            is_score = get_interference(current_workload_type, "hybrid", self.interference_matrix)
+            # Use dynamically classified pattern against the node's existing workload type
+            node_workload = telem.get("pattern_type", current_workload_type)
+            is_score = get_interference(pattern_label, node_workload, self.interference_matrix)
 
             # Fusion score S(i)
             s_i = compute_node_score(pfail, is_score, util, self.alpha, self.beta, self.gamma)
@@ -144,10 +146,13 @@ class FusionEngine:
         # Rank nodes descending by composite score S(i)
         scored_nodes.sort(key=lambda x: x["score"], reverse=True)
 
+        # Cap selected nodes at cluster size to prevent out-of-range selection
+        max_selectable = min(k_replicas, len(scored_nodes))
+
         return {
             "pattern_label": pattern_label,
             "predicted_load": pred_load,
             "target_replicas": k_replicas,
             "ranked_nodes": scored_nodes,
-            "selected_nodes": [n["node_id"] for n in scored_nodes[:k_replicas]]
+            "selected_nodes": [n["node_id"] for n in scored_nodes[:max_selectable]]
         }

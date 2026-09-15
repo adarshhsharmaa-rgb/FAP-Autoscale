@@ -5,7 +5,7 @@ Person A: Workload time series generator (Periodic, Bursty, Hybrid).
 Person B: Per-node hardware telemetry generator (CPU, Run-Queue, Context Switches, Thermal, Memory/Disk/Net faults).
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 import numpy as np
 import pandas as pd
 
@@ -176,14 +176,16 @@ def generate_node_telemetry(
     return pd.DataFrame(records)
 
 
-def extract_single_node_telemetry(df: pd.DataFrame, node_id: str, window_id: int) -> dict:
+def extract_single_node_telemetry(df: pd.DataFrame, node_id: str, window_id: int) -> Dict[str, Any]:
     """
     Utility function to fetch telemetry dictionary for a given node at a specific window.
     """
     row = df[(df["node_id"] == node_id) & (df["window_id"] == window_id)]
     if row.empty:
-        # Fallback dummy telemetry
+        # Fallback dummy telemetry with consistent schema
         return {
+            "node_id": node_id,
+            "window_id": window_id,
             "cpu_utilization": 30.0,
             "run_queue_length": 2.0,
             "context_switch_rate": 1000.0,
@@ -191,7 +193,8 @@ def extract_single_node_telemetry(df: pd.DataFrame, node_id: str, window_id: int
             "tdp": 105.0,
             "dimm_errors": 0,
             "disk_health": 1.0,
-            "net_retransmits": 0
+            "net_retransmits": 0,
+            "will_fail": False
         }
     rec = row.iloc[0].to_dict()
     return rec

@@ -5,7 +5,8 @@ Maintains a 15-bin interference matrix representing cross-workload resource cont
 (Last-Level Cache, Memory Bandwidth, I/O bandwidth) with Exponential Moving Average (EMA) updates.
 """
 
-from typing import Dict, Union, Tuple, Optional
+from typing import Union, Optional
+import hashlib
 import numpy as np
 
 
@@ -60,8 +61,8 @@ class InterferenceMatrix:
                     return num % self.num_bins
                 except ValueError:
                     pass
-            # Hash fallback for arbitrary workload type strings
-            return abs(hash(clean_type)) % self.num_bins
+            # Deterministic hash fallback for arbitrary workload type strings
+            return int(hashlib.md5(clean_type.encode()).hexdigest(), 16) % self.num_bins
         return 0
 
     def get_interference(self, type_i: Union[str, int], type_j: Union[str, int]) -> float:
