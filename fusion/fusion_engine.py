@@ -14,8 +14,8 @@ import math
 from typing import Dict, List, Any, Optional
 import numpy as np
 
-from models.failure_scorer import NodeFailureScorer, score_node_failure
-from models.interference import InterferenceMatrix, get_interference
+from models.node_health.failure_scorer import NodeFailureScorer, score_node_failure
+from models.node_health.interference import InterferenceMatrix, get_interference
 from models.forecasters import classify_and_forecast
 
 

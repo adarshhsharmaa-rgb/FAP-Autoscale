@@ -18,8 +18,8 @@ from data_gen.synthetic_data import (
     generate_node_telemetry,
     extract_single_node_telemetry
 )
-from models.failure_scorer import NodeFailureScorer, score_node_failure
-from models.interference import InterferenceMatrix
+from models.node_health.failure_scorer import NodeFailureScorer, score_node_failure
+from models.node_health.interference import InterferenceMatrix
 from fusion.fusion_engine import FusionEngine
 from simulator.baselines import ReactiveHPAScaler, LSTMRoundRobinScaler
 from results.evaluate import evaluate_experiment_results, plot_evaluation_summary

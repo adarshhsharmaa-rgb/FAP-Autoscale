@@ -1,10 +1,10 @@
 """
 Models package for FAP-Scale.
-Contains workload classifier, forecasters, failure scorer, and interference matrix.
+Contains workload classifier, forecasters, and node health (failure scorer + interference matrix).
 """
 
-from .failure_scorer import NodeFailureScorer, score_node_failure, calculate_cpi, calculate_tts
-from .interference import InterferenceMatrix, get_interference
+from .node_health.failure_scorer import NodeFailureScorer, score_node_failure, calculate_cpi, calculate_tts
+from .node_health.interference import InterferenceMatrix, get_interference
 from .pattern_classifier import classify_workload_pattern
 from .forecasters import classify_and_forecast
 

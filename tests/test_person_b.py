@@ -8,13 +8,13 @@ from data_gen.synthetic_data import (
     generate_workload_time_series,
     generate_node_telemetry,
 )
-from models.failure_scorer import (
+from models.node_health.failure_scorer import (
     NodeFailureScorer,
     score_node_failure,
     calculate_cpi,
     calculate_tts
 )
-from models.interference import (
+from models.node_health.interference import (
     InterferenceMatrix,
     get_interference
 )
