@@ -1,0 +1,25 @@
+{
+  "n_test_windows": 45,
+  "rolling_steps_per_window": 12,
+  "classifier_accuracy": {
+    "rules": 0.9778,
+    "tree": 0.9556
+  },
+  "overall_nrmse": {
+    "naive_last": 0.2586,
+    "ARIMA": 0.2594,
+    "LSTM": 0.297,
+    "XGBoost": 0.2365,
+    "Dynamic (FAP-Scale)": 0.2157,
+    "Oracle routing": 0.2158
+  },
+  "best_single_model": "XGBoost",
+  "dynamic_vs_best_single_improvement_pct": 8.8,
+  "routing_accuracy_in_loop": 0.9741,
+  "mean_latency_ms": {
+    "ARIMA": 181.9,
+    "LSTM": 133.6,
+    "XGBoost": 49.5
+  },
+  "note": "Synthetic data; preliminary simulation results, not Google trace numbers."
+}
