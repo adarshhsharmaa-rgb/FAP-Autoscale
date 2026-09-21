@@ -106,6 +106,10 @@ def run_fap_scale_simulation(
     hpa_history = []
     lstm_history = []
 
+    # Rolling load buffer — accumulate at least 120 points so LSTM/ARIMA
+    # have sufficient context.  Window_size is 60 s, so we keep 2 windows back.
+    load_buffer: list = []
+
     # ── Step 4: 60-second window control loop ────────────────────────────────
     print("\n[Step 4] Executing Simulation Control Loop (60 s window ticks)...")
     header = (
@@ -121,6 +125,10 @@ def run_fap_scale_simulation(
         win_workload = workload_df[workload_df["window_id"] == w]["request_rate"].values
         actual_load = float(np.mean(win_workload)) if len(win_workload) > 0 else 50.0
 
+        # Build rolling buffer: keep up to 120 most-recent samples
+        load_buffer.extend(win_workload.tolist())
+        rolling_window = load_buffer[-120:]          # >= 60 always; up to 120
+
         # Gather telemetry for all nodes at this window
         curr_telemetry = []
         node_pfails: Dict[str, float] = {}
@@ -132,7 +140,7 @@ def run_fap_scale_simulation(
 
         # ── FAP-Scale Fusion Engine ──────────────────────────────────────────
         fap_result = fusion_engine.evaluate_window(
-            workload_window=list(win_workload),
+            workload_window=rolling_window,
             cluster_telemetry=curr_telemetry,
             current_workload_type=pattern,
         )
@@ -147,7 +155,7 @@ def run_fap_scale_simulation(
         hpa_history.append(hpa_res)
 
         # ── LSTM Round-Robin baseline ────────────────────────────────────────
-        lstm_res = lstm_baseline.evaluate_window(list(win_workload), curr_telemetry)
+        lstm_res = lstm_baseline.evaluate_window(rolling_window, curr_telemetry)
         lstm_res["actual_load"] = actual_load
         lstm_res["node_pfails"] = node_pfails
         lstm_history.append(lstm_res)

@@ -352,22 +352,20 @@ class TestEndToEndIntegration(unittest.TestCase):
     """
 
     def test_full_pipeline_runs(self):
-        import os
+        from models.node_health.failure_scorer import score_node_failure
 
         NUM_WINDOWS = 10
         NUM_NODES = 6
+        WINDOW_SIZE = 60
 
-        # Generate data (Person A + B)
         workload_df = generate_workload_time_series(num_windows=NUM_WINDOWS, pattern="hybrid", seed=99)
         telemetry_df = generate_node_telemetry(num_nodes=NUM_NODES, num_windows=NUM_WINDOWS,
                                                fail_node_ids=["node-02"], seed=99)
 
-        # Train Person B models
         scorer = NodeFailureScorer(random_state=99)
         scorer.fit(telemetry_df)
         imat = InterferenceMatrix(alpha=0.1, seed=99)
 
-        # Person C Fusion Engine
         engine = FusionEngine(alpha=0.4, beta=0.35, gamma=0.25,
                               replica_capacity=20.0,
                               failure_scorer=scorer,
@@ -376,10 +374,14 @@ class TestEndToEndIntegration(unittest.TestCase):
         lstm = LSTMRoundRobinScaler()
 
         fap_history, hpa_history, lstm_history = [], [], []
+        load_buffer = []
 
         for w in range(NUM_WINDOWS):
             win_wl = workload_df[workload_df["window_id"] == w]["request_rate"].values
             actual = float(np.mean(win_wl)) if len(win_wl) > 0 else 50.0
+
+            load_buffer.extend(win_wl.tolist())
+            rolling = load_buffer[-120:]
 
             curr_telemetry = []
             pfails = {}
@@ -387,9 +389,9 @@ class TestEndToEndIntegration(unittest.TestCase):
                 nid = f"node-{n:02d}"
                 t = extract_single_node_telemetry(telemetry_df, nid, w)
                 curr_telemetry.append(t)
-                pfails[nid] = scorer.predict_pfail(t)
+                pfails[nid] = score_node_failure(nid, t, scorer)
 
-            fap_r = engine.evaluate_window(list(win_wl), curr_telemetry)
+            fap_r = engine.evaluate_window(rolling, curr_telemetry)
             fap_r["actual_load"] = actual
             fap_r["node_pfails"] = pfails
             fap_history.append(fap_r)
@@ -399,17 +401,15 @@ class TestEndToEndIntegration(unittest.TestCase):
             hpa_r["node_pfails"] = pfails
             hpa_history.append(hpa_r)
 
-            lstm_r = lstm.evaluate_window(list(win_wl), curr_telemetry)
+            lstm_r = lstm.evaluate_window(rolling, curr_telemetry)
             lstm_r["actual_load"] = actual
             lstm_r["node_pfails"] = pfails
             lstm_history.append(lstm_r)
 
-        # Basic sanity checks
         self.assertEqual(len(fap_history), NUM_WINDOWS)
         self.assertEqual(len(hpa_history), NUM_WINDOWS)
         self.assertEqual(len(lstm_history), NUM_WINDOWS)
 
-        # All decisions should have valid replicas
         for entry in fap_history:
             self.assertGreaterEqual(entry["target_replicas"], 1)
         for entry in hpa_history:
@@ -417,7 +417,6 @@ class TestEndToEndIntegration(unittest.TestCase):
         for entry in lstm_history:
             self.assertGreaterEqual(entry["target_replicas"], 1)
 
-        # EMA should have mutated the interference matrix
         stats = engine.summary_stats()
         self.assertEqual(stats["windows_processed"], NUM_WINDOWS)
 
@@ -425,10 +424,9 @@ class TestEndToEndIntegration(unittest.TestCase):
         """
         FAP-Scale should place fewer replicas on high-Pfail nodes than
         round-robin because it actively avoids them.
-        Over a simulation with obviously degrading nodes, FAP unhealthy count
-        should be ≤ LSTM-RR unhealthy count.
         """
         from results.evaluate import evaluate_experiment_results
+        from models.node_health.failure_scorer import score_node_failure
 
         NUM_WINDOWS = 15
         NUM_NODES = 8
@@ -448,10 +446,14 @@ class TestEndToEndIntegration(unittest.TestCase):
         lstm = LSTMRoundRobinScaler()
 
         fap_hist, lstm_hist = [], []
+        load_buffer = []
 
         for w in range(NUM_WINDOWS):
             win_wl = workload_df[workload_df["window_id"] == w]["request_rate"].values
             actual = float(np.mean(win_wl)) if len(win_wl) > 0 else 50.0
+
+            load_buffer.extend(win_wl.tolist())
+            rolling = load_buffer[-120:]
 
             curr_telemetry = []
             pfails = {}
@@ -459,14 +461,14 @@ class TestEndToEndIntegration(unittest.TestCase):
                 nid = f"node-{n:02d}"
                 t = extract_single_node_telemetry(telemetry_df, nid, w)
                 curr_telemetry.append(t)
-                pfails[nid] = scorer.predict_pfail(t)
+                pfails[nid] = score_node_failure(nid, t, scorer)
 
-            fr = engine.evaluate_window(list(win_wl), curr_telemetry)
+            fr = engine.evaluate_window(rolling, curr_telemetry)
             fr["actual_load"] = actual
             fr["node_pfails"] = pfails
             fap_hist.append(fr)
 
-            lr = lstm.evaluate_window(list(win_wl), curr_telemetry)
+            lr = lstm.evaluate_window(rolling, curr_telemetry)
             lr["actual_load"] = actual
             lr["node_pfails"] = pfails
             lstm_hist.append(lr)
@@ -474,7 +476,6 @@ class TestEndToEndIntegration(unittest.TestCase):
         fap_metrics = evaluate_experiment_results(fap_hist)
         lstm_metrics = evaluate_experiment_results(lstm_hist)
 
-        # FAP should have fewer or equal unhealthy placements than blind RR
         self.assertLessEqual(
             fap_metrics["unhealthy_placements"],
             lstm_metrics["unhealthy_placements"],

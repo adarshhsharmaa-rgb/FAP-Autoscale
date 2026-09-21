@@ -267,6 +267,32 @@ FORECASTERS = {
     "XGBoost": forecast_xgboost,
 }
 
+# ─── Backward-compat shim ───────────────────────────────────────────────────
+# test_person_b.py imports classify_and_forecast from models.forecasters
+# with the old tuple signature (pattern, predicted_load).
+# New code should use models.load_pipeline.classify_and_forecast() instead.
+from typing import Tuple, Union  # noqa: E402
+
+
+def classify_and_forecast(
+    window_data: Union[np.ndarray, list],
+) -> Tuple[str, float]:
+    """
+    Legacy shim: classify_and_forecast(window) -> (pattern_label, predicted_load).
+    Prefer models.load_pipeline.classify_and_forecast() for new code.
+    Handles short windows (< 32 points) by using a simple EMA fallback.
+    """
+    from models.pattern_classifier import classify_pattern
+    series = np.asarray(window_data, dtype=float)
+    if len(series) < 32:
+        # Too short to classify — use hybrid default + EMA forecast
+        pred = float(series[-1]) if len(series) > 0 else 50.0
+        return "hybrid", pred
+    pattern, _ = classify_pattern(series)
+    model_name = {"periodic": "ARIMA", "bursty": "LSTM", "hybrid": "XGBoost"}[pattern]
+    out = FORECASTERS[model_name](series)
+    return pattern, float(out["forecast"][0])
+
 if __name__ == "__main__":
     import time
     from data_gen.synthetic_data import generate_workload_series
