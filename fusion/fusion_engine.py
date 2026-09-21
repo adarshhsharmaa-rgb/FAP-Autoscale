@@ -27,7 +27,7 @@ import numpy as np
 
 from models.node_health.failure_scorer import NodeFailureScorer, score_node_failure
 from models.node_health.interference import InterferenceMatrix, get_interference
-from models.forecasters import classify_and_forecast
+from models.load_pipeline import classify_and_forecast
 
 
 # ─────────────────────────────────────────────
@@ -200,7 +200,9 @@ class FusionEngine:
 
         # ── Step 1: Person A — Workload classification & load forecast ──────
         series = np.array(workload_window, dtype=float) if len(workload_window) > 0 else np.array([50.0])
-        pattern_label, pred_load = classify_and_forecast(series)
+        res = classify_and_forecast(series)
+        pattern_label = res["pattern"]
+        pred_load = res["predicted_load"]
 
         # ── Step 2: Target replica count ────────────────────────────────────
         k_replicas = calculate_replicas(pred_load, self.replica_capacity)

@@ -49,7 +49,7 @@ def _make_cluster(n: int = 5) -> list:
     return [_make_telemetry(f"node-{i:02d}", cpu=30.0 + i * 5) for i in range(1, n + 1)]
 
 
-def _make_workload(size: int = 30, val: float = 60.0) -> list:
+def _make_workload(size: int = 60, val: float = 60.0) -> list:
     return [val + float(np.sin(i / 5.0) * 5) for i in range(size)]
 
 
@@ -133,7 +133,7 @@ class TestFusionEngineEvaluateWindow(unittest.TestCase):
     def setUp(self):
         self.engine = FusionEngine(alpha=0.4, beta=0.35, gamma=0.25)
         self.cluster = _make_cluster(n=6)
-        self.workload = _make_workload(size=30, val=60.0)
+        self.workload = _make_workload(size=60, val=60.0)
 
     def test_output_keys_present(self):
         result = self.engine.evaluate_window(self.workload, self.cluster)
@@ -189,7 +189,7 @@ class TestFusionEngineEMAFeedback(unittest.TestCase):
     def test_matrix_changes_after_window(self):
         engine = FusionEngine(alpha=0.4, beta=0.35, gamma=0.25)
         cluster = _make_cluster(n=4)
-        workload = _make_workload(size=30, val=60.0)
+        workload = _make_workload(size=60, val=60.0)
 
         # Snapshot matrix before
         mat_before = engine.interference_matrix.matrix.copy()
@@ -305,7 +305,7 @@ class TestLSTMRoundRobinScaler(unittest.TestCase):
 
     def setUp(self):
         self.cluster = _make_cluster(n=5)
-        self.workload = _make_workload(size=30, val=80.0)
+        self.workload = _make_workload(size=60, val=80.0)
 
     def test_output_schema(self):
         scaler = LSTMRoundRobinScaler()

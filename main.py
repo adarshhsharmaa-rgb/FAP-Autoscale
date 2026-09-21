@@ -34,6 +34,7 @@ from models.node_health.interference import InterferenceMatrix
 # ── Person C modules ─────────────────────────────────────────────────────────
 from fusion.fusion_engine import FusionEngine
 from simulator.baselines import ReactiveHPAScaler, LSTMRoundRobinScaler
+from models.load_pipeline import warm_up
 
 # ── Evaluation ───────────────────────────────────────────────────────────────
 from results.evaluate import evaluate_experiment_results, plot_evaluation_summary
@@ -87,7 +88,9 @@ def run_fap_scale_simulation(
     print("  - 15-bin Co-location Interference Matrix initialised (EMA α=0.1).")
 
     # ── Step 3: Initialise Person C strategies ───────────────────────────────
-    print("\n[Step 3] Initialising FAP-Scale Fusion Engine & Baseline Scalers...")
+    print("\n[Step 3] Warming up forecasters...")
+    warm_up()
+    print("\n[Step 3b] Initialising FAP-Scale Fusion Engine & Baseline Scalers...")
     fusion_engine = FusionEngine(
         alpha=0.4,
         beta=0.35,

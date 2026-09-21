@@ -1,101 +1,234 @@
 """
-Workload Pattern Classifier (Person A skeleton & implementation).
+models/pattern_classifier.py  (Person A)
 
-Computes 4 time-series features:
-1. Autocorrelation peak count
-2. Wavelet energy ratio
-3. Coefficient of Variation (CV)
-4. Hurst exponent
+Workload pattern classifier for FAP-Scale Section IV-A.
+Four features per window (as in the Review-1 paper):
 
-Classifies workload into 'periodic', 'bursty', or 'hybrid'.
+    acf_peaks      autocorrelation peak count      -> periodicity
+    wavelet_ratio  high-freq / total wavelet energy -> spikiness
+    cv             coefficient of variation         -> dispersion
+    hurst          Hurst exponent (R/S)             -> long-range memory / trend
+
+Two classifiers are provided:
+    classify_rule_based()  explainable thresholds (default; no training needed)
+    PatternClassifier      sklearn DecisionTree trained on labelled synthetic windows
 """
+from __future__ import annotations
 
-from typing import Union
 import numpy as np
-import pandas as pd
+
+try:
+    from statsmodels.tsa.stattools import acf as _sm_acf
+except ImportError:  # pragma: no cover
+    _sm_acf = None
+
+try:
+    import pywt
+except ImportError:  # pragma: no cover
+    pywt = None
+
+try:
+    from hurst import compute_Hc
+except ImportError:  # pragma: no cover
+    compute_Hc = None
+
+FEATURE_NAMES = ["acf_peaks", "wavelet_ratio", "cv", "hurst"]
+ACF_PEAK_THRESHOLD = 0.3
 
 
-def compute_autocorr_peaks(series: np.ndarray) -> int:
-    """Compute number of prominent autocorrelation peaks."""
-    if len(series) < 10:
-        return 0
-    # Demean series
-    norm_series = series - np.mean(series)
-    autocorr = np.correlate(norm_series, norm_series, mode="full")
-    autocorr = autocorr[len(autocorr) // 2:]
-    if autocorr[0] != 0:
-        autocorr = autocorr / autocorr[0]
+# --------------------------------------------------------------------------- #
+# Feature 1: autocorrelation peak count
+# --------------------------------------------------------------------------- #
+def _acf(x, nlags):
+    if _sm_acf is not None:
+        return _sm_acf(x, nlags=nlags, fft=True)
+    x = x - x.mean()
+    denom = np.dot(x, x) or 1.0
+    return np.array([np.dot(x[: len(x) - k], x[k:]) / denom for k in range(nlags + 1)])
 
-    # Simple peak detection
+
+def autocorr_peak_count(window, threshold=ACF_PEAK_THRESHOLD, max_lag=72):
+    """Number of local maxima in the ACF (lag >= 2) that exceed `threshold`."""
+    x = np.asarray(window, dtype=float)
+    nlags = int(min(max_lag, len(x) // 2))
+    r = _acf(x, nlags)
     peaks = 0
-    for i in range(1, len(autocorr) - 1):
-        if autocorr[i] > autocorr[i - 1] and autocorr[i] > autocorr[i + 1] and autocorr[i] > 0.3:
+    for k in range(2, len(r) - 1):
+        if r[k] > threshold and r[k] >= r[k - 1] and r[k] >= r[k + 1]:
             peaks += 1
     return peaks
 
 
-def compute_cv(series: np.ndarray) -> float:
-    """Compute Coefficient of Variation (std / mean)."""
-    mean = np.mean(series)
-    if abs(mean) < 1e-6:
-        return 0.0
-    return float(np.std(series) / abs(mean))
-
-
-def compute_hurst_exponent(series: np.ndarray) -> float:
-    """Compute simplified Hurst exponent estimation."""
-    if len(series) < 20:
-        return 0.5
-    lags = range(2, min(20, len(series) // 2))
-    tau = [np.sqrt(np.std(np.subtract(series[lag:], series[:-lag]))) for lag in lags]
-    if any(t <= 0 for t in tau):
-        return 0.5
-    poly = np.polyfit(np.log(lags), np.log(tau), 1)
-    return float(np.clip(poly[0] * 2.0, 0.0, 1.0))
-
-
-def compute_wavelet_energy(series: np.ndarray) -> float:
-    """Compute energy ratio across low/high frequency components."""
-    if len(series) < 8:
-        return 0.5
-    fft_vals = np.abs(np.fft.fft(series))
-    mid = len(fft_vals) // 2
-    low_energy = np.sum(fft_vals[:mid] ** 2)
-    total_energy = np.sum(fft_vals ** 2)
-    if total_energy == 0:
-        return 0.5
-    return float(low_energy / total_energy)
-
-
-def classify_workload_pattern(window_data: Union[np.ndarray, pd.Series, list]) -> str:
+# --------------------------------------------------------------------------- #
+# Feature 2: wavelet energy ratio
+# --------------------------------------------------------------------------- #
+def wavelet_energy_ratio(window, wavelet="db1", level=3):
     """
-    Person A deliverable function:
-    Classify input workload window data into pattern: 'periodic', 'bursty', or 'hybrid'.
-
-    Args:
-        window_data: Time series array or Series of request rates / cpu demand.
-
-    Returns:
-        pattern_label: 'periodic', 'bursty', or 'hybrid'
+    Share of signal energy in the two finest detail bands (cD1, cD2).
+    Spikes put energy in fine scales; smooth cycles keep it in cA/cD3.
+    The mean is removed first so the DC level doesn't dominate.
     """
-    series = np.array(window_data, dtype=float)
-    if len(series) == 0:
-        return "periodic"
+    x = np.asarray(window, dtype=float)
+    x = x - x.mean()
+    if pywt is not None:
+        coeffs = pywt.wavedec(x, wavelet, level=level)  # [cA3, cD3, cD2, cD1]
+        energies = [float(np.sum(c ** 2)) for c in coeffs]
+        fine = energies[-1] + energies[-2]
+    else:  # Haar fallback: first differences approximate the finest details
+        d1 = np.diff(x)[::2] / np.sqrt(2)
+        d2 = np.diff(x[::2])[::2] / 2
+        fine = float(np.sum(d1 ** 2) + np.sum(d2 ** 2))
+        energies = [float(np.sum(x ** 2))]
+    total = sum(energies) if pywt is not None else energies[0]
+    return fine / total if total > 0 else 0.0
 
-    cv = compute_cv(series)
-    peaks = compute_autocorr_peaks(series)
-    hurst = compute_hurst_exponent(series)
-    wavelet_ratio = compute_wavelet_energy(series)
 
-    # Classification logic using all 4 features
-    # High CV + few autocorr peaks + low hurst = bursty (random spikes, no long-range structure)
-    if cv > 0.4 and peaks < 2 and hurst < 0.55:
+# --------------------------------------------------------------------------- #
+# Feature 3: coefficient of variation
+# --------------------------------------------------------------------------- #
+def coefficient_of_variation(window):
+    x = np.asarray(window, dtype=float)
+    m = x.mean()
+    return float(x.std() / m) if m != 0 else 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Feature 4: Hurst exponent
+# --------------------------------------------------------------------------- #
+def _hurst_rs(x):
+    """Plain rescaled-range estimate (fallback when `hurst` isn't installed)."""
+    n = len(x)
+    sizes = np.unique(np.floor(np.logspace(np.log10(8), np.log10(n // 2), 8)).astype(int))
+    rs = []
+    for s in sizes:
+        vals = []
+        for start in range(0, n - s + 1, s):
+            seg = x[start:start + s]
+            dev = np.cumsum(seg - seg.mean())
+            sd = seg.std()
+            if sd > 0:
+                vals.append((dev.max() - dev.min()) / sd)
+        if vals:
+            rs.append(np.mean(vals))
+    slope, _ = np.polyfit(np.log(sizes[: len(rs)]), np.log(rs), 1)
+    return float(slope)
+
+
+def hurst_exponent(window):
+    x = np.asarray(window, dtype=float)
+    if compute_Hc is not None and len(x) >= 100:
+        try:
+            H, _, _ = compute_Hc(x, kind="change", simplified=True)
+            return float(H)
+        except Exception:
+            pass
+    return _hurst_rs(np.diff(x))
+
+
+# --------------------------------------------------------------------------- #
+# Feature vector
+# --------------------------------------------------------------------------- #
+def extract_features(window) -> dict:
+    x = np.asarray(window, dtype=float)
+    if len(x) < 32:
+        raise ValueError("window needs at least 32 points for stable features")
+    return {
+        "acf_peaks": autocorr_peak_count(x),
+        "wavelet_ratio": wavelet_energy_ratio(x),
+        "cv": coefficient_of_variation(x),
+        "hurst": hurst_exponent(x),
+    }
+
+
+def features_to_vector(feats: dict) -> np.ndarray:
+    return np.array([feats[k] for k in FEATURE_NAMES], dtype=float)
+
+
+# --------------------------------------------------------------------------- #
+# Classifier 1: rule-based (explainable, zero training)
+# Thresholds were chosen from feature distributions on 300 synthetic windows
+# (generate_workload_windows(300, seed=1)); tested on separate seeds.
+# --------------------------------------------------------------------------- #
+RULES = {
+    "bursty_hurst_max": 0.68,      # bursty series have little long-range memory
+    "bursty_cv_min": 0.50,         # ...and high dispersion
+    "periodic_wavelet_max": 0.30,  # smooth cycles keep energy in coarse bands
+    "periodic_min_peaks": 2,       # at least two clear ACF peaks
+}
+
+
+def classify_rule_based(feats: dict) -> str:
+    r = RULES
+    no_cycle = feats["acf_peaks"] == 0
+    if no_cycle and (feats["hurst"] < r["bursty_hurst_max"] or feats["cv"] >= r["bursty_cv_min"]):
         return "bursty"
-    # Multiple autocorr peaks + low CV + high wavelet low-freq energy = periodic
-    elif peaks >= 2 and cv < 0.35 and wavelet_ratio > 0.6:
+    if feats["acf_peaks"] >= r["periodic_min_peaks"] and feats["wavelet_ratio"] < r["periodic_wavelet_max"]:
         return "periodic"
-    # Strong long-range correlation alone also indicates periodic
-    elif hurst > 0.65 and peaks >= 1:
-        return "periodic"
-    else:
-        return "hybrid"
+    if no_cycle and feats["hurst"] < r["bursty_hurst_max"] + 0.1:
+        return "bursty"
+    return "hybrid"
+
+
+# --------------------------------------------------------------------------- #
+# Classifier 2: decision tree trained on labelled synthetic windows
+# --------------------------------------------------------------------------- #
+class PatternClassifier:
+    """Thin wrapper around sklearn's DecisionTreeClassifier."""
+
+    def __init__(self, max_depth: int = 4, random_state: int = 0):
+        from sklearn.tree import DecisionTreeClassifier
+        self.model = DecisionTreeClassifier(max_depth=max_depth, random_state=random_state)
+        self.fitted = False
+
+    def fit(self, windows, labels):
+        X = np.vstack([features_to_vector(extract_features(w)) for w in windows])
+        self.model.fit(X, list(labels))
+        self.fitted = True
+        return self
+
+    def predict_features(self, feats: dict) -> str:
+        return str(self.model.predict(features_to_vector(feats).reshape(1, -1))[0])
+
+    def predict(self, window) -> str:
+        return self.predict_features(extract_features(window))
+
+    def rules_text(self) -> str:
+        from sklearn.tree import export_text
+        return export_text(self.model, feature_names=FEATURE_NAMES)
+
+
+_TREE: PatternClassifier | None = None
+
+
+def get_trained_tree(n_train: int = 240, seed: int = 123) -> PatternClassifier:
+    """Train once on synthetic data and cache (so the control loop stays fast)."""
+    global _TREE
+    if _TREE is None:
+        from data_gen.synthetic_data import generate_workload_windows
+        data = generate_workload_windows(n_train, seed=seed)
+        _TREE = PatternClassifier().fit([w for w, _ in data], [l for _, l in data])
+    return _TREE
+
+
+def classify_pattern(window, method: str = "rules") -> tuple[str, dict]:
+    """
+    Public entry point.
+    method: "rules" (default) or "tree"
+    returns (pattern_label, features_dict)
+    """
+    feats = extract_features(window)
+    if method == "tree":
+        return get_trained_tree().predict_features(feats), feats
+    return classify_rule_based(feats), feats
+
+
+if __name__ == "__main__":
+    from data_gen.synthetic_data import generate_workload_windows
+    test = generate_workload_windows(30, seed=999)
+    for method in ("rules", "tree"):
+        correct = sum(classify_pattern(w, method)[0] == l for w, l in test)
+        print(f"{method:5s} accuracy on 30 unseen windows: {correct}/30")
+    w, l = test[0]
+    lab, f = classify_pattern(w)
+    print(f"\nexample: true={l} predicted={lab} features="
+          + ", ".join(f"{k}={v:.3f}" for k, v in f.items()))

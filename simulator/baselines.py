@@ -21,7 +21,7 @@ import math
 from typing import Dict, List, Any, Tuple
 import numpy as np
 
-from models.forecasters import LSTMForecaster
+from models.load_pipeline import forecast_with_model
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,7 +135,6 @@ class LSTMRoundRobinScaler:
 
     def __init__(self, replica_capacity: float = 20.0):
         self.replica_capacity = replica_capacity
-        self.forecaster = LSTMForecaster()
         self.rr_index: int = 0
         self.history: List[Dict[str, Any]] = []
 
@@ -166,7 +165,8 @@ class LSTMRoundRobinScaler:
 
         # ── LSTM forecast ────────────────────────────────────────────────────
         series = np.array(workload_window, dtype=float)
-        pred_load = self.forecaster.predict_next(series)
+        res = forecast_with_model(series, "LSTM")
+        pred_load = res["predicted_load"]
         target_replicas = max(1, math.ceil(pred_load / self.replica_capacity))
 
         # ── Round-robin placement (blind) ────────────────────────────────────
