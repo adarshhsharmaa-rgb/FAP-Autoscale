@@ -83,35 +83,75 @@ def evaluate_experiment_results(
 def plot_evaluation_summary(metrics_by_strategy: Dict[str, Dict[str, Any]], save_path: str = "results_plot.png"):
     """
     Generate bar charts comparing metrics across autoscaling strategies.
+    Handles overlapping labels, integer y-axes, and zero-value charts cleanly.
     """
     try:
+        import matplotlib
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         strategies = list(metrics_by_strategy.keys())
+        # Use short labels for x-axis, full names in legend/title
+        short_labels = []
+        for s in strategies:
+            if "FAP" in s:
+                short_labels.append("FAP-Scale")
+            elif "HPA" in s:
+                short_labels.append("Reactive HPA")
+            elif "LSTM" in s or "RoundRobin" in s:
+                short_labels.append("LSTM-RR")
+            else:
+                short_labels.append(s[:12])
+
         sla = [metrics_by_strategy[s]["sla_violations"] for s in strategies]
         overprov = [metrics_by_strategy[s]["overprovisioning_percent"] for s in strategies]
         unhealthy = [metrics_by_strategy[s]["unhealthy_placements"] for s in strategies]
 
-        # Dynamic color palette that scales with number of strategies
-        default_colors = ["#e74c3c", "#f39c12", "#2ecc71", "#3498db", "#9b59b6"]
-        colors = (default_colors * ((len(strategies) // len(default_colors)) + 1))[:len(strategies)]
+        colors = ["#2ecc71", "#e74c3c", "#f39c12", "#3498db", "#9b59b6"]
+        colors = (colors * ((len(strategies) // len(colors)) + 1))[:len(strategies)]
 
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+        fig, axes = plt.subplots(1, 3, figsize=(16, 5.5))
+        fig.suptitle("FAP-Scale vs Baseline Autoscaling Strategies", fontsize=14, fontweight="bold", y=1.02)
 
-        axes[0].bar(strategies, sla, color=colors)
-        axes[0].set_title("SLA Violations (Lower is Better)")
+        # --- Chart 1: SLA Violations ---
+        bars1 = axes[0].bar(short_labels, sla, color=colors, edgecolor="white", linewidth=1.2)
+        axes[0].set_title("SLA Violations\n(Lower is Better)", fontsize=11)
         axes[0].set_ylabel("Count")
+        axes[0].set_ylim(0, max(max(sla) * 1.3, 1))
+        # Add value labels on bars
+        for bar, val in zip(bars1, sla):
+            axes[0].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                         str(int(val)), ha="center", va="bottom", fontweight="bold", fontsize=11)
 
-        axes[1].bar(strategies, overprov, color=colors)
-        axes[1].set_title("Over-Provisioning % (Lower is Better)")
+        # --- Chart 2: Over-Provisioning % ---
+        bars2 = axes[1].bar(short_labels, overprov, color=colors, edgecolor="white", linewidth=1.2)
+        axes[1].set_title("Over-Provisioning %\n(Lower is Better)", fontsize=11)
         axes[1].set_ylabel("Percentage (%)")
+        axes[1].set_ylim(0, max(max(overprov) * 1.3, 1))
+        for bar, val in zip(bars2, overprov):
+            axes[1].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                         f"{val:.1f}%", ha="center", va="bottom", fontweight="bold", fontsize=11)
 
-        axes[2].bar(strategies, unhealthy, color=colors)
-        axes[2].set_title("Unhealthy Node Placements (Lower is Better)")
+        # --- Chart 3: Unhealthy Placements ---
+        bars3 = axes[2].bar(short_labels, unhealthy, color=colors, edgecolor="white", linewidth=1.2)
+        axes[2].set_title("Unhealthy Node Placements\n(Lower is Better)", fontsize=11)
         axes[2].set_ylabel("Count")
+        # Fix: when all values are 0, set a sensible y-axis range instead of 0.04
+        max_unhealthy = max(unhealthy) if max(unhealthy) > 0 else 5
+        axes[2].set_ylim(0, max_unhealthy * 1.3)
+        axes[2].yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+        for bar, val in zip(bars3, unhealthy):
+            axes[2].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
+                         str(int(val)), ha="center", va="bottom", fontweight="bold", fontsize=11)
+
+        # Rotate x-axis labels slightly for readability
+        for ax in axes:
+            ax.tick_params(axis="x", rotation=0)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
 
         plt.tight_layout()
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
         print(f"Evaluation plot saved successfully to {save_path}")
     except Exception as e:
