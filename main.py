@@ -85,7 +85,7 @@ def run_fap_scale_simulation(
     print(f"  - NodeFailureScorer trained ({backend}) on {len(node_telemetry_df)} telemetry rows.")
 
     interference_matrix = InterferenceMatrix(alpha=0.1, seed=42)
-    print("  - 15-bin Co-location Interference Matrix initialised (EMA α=0.1).")
+    print("  - 15-bin Co-location Interference Matrix initialised (EMA alpha=0.1).")
 
     # ── Step 3: Initialise Person C strategies ───────────────────────────────
     print("\n[Step 3] Warming up forecasters...")

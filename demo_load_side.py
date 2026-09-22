@@ -38,7 +38,7 @@ def main():
     traces = generate_service_traces(n_services=3, length=WINDOW + args.ticks + 1)
     for tick in range(args.ticks):
         now = WINDOW + tick
-        print(f"── tick {tick + 1}  (t = {now} min) " + "─" * 60)
+        print(f"-- tick {tick + 1}  (t = {now} min) " + "-" * 60)
         for sid, tr in traces.items():
             out = classify_and_forecast(tr["load"][now - WINDOW:now], classifier=args.classifier)
             actual = tr["load"][now]
