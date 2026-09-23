@@ -56,7 +56,7 @@ fap-scale/
 | :--- | :--- | :--- |
 | **Person A (Nirupam)** | `models/pattern_classifier.py`<br>`models/forecasters.py`<br>`models/load_pipeline.py` | • Compute 4 features (Autocorr peaks, Wavelet energy, CV, Hurst exp).<br>• Classify workload pattern (`periodic`, `bursty`, `hybrid`).<br>• ARIMA, LSTM, XGBoost load forecasting with dynamic routing.<br>• **Deliverable**: `classify_and_forecast(window) → dict` with `pattern`, `predicted_load`, `model_used` |
 | **Person B (Adarsh)** | `data_gen/synthetic_data.py`<br>`models/node_health/failure_scorer.py`<br>`models/node_health/interference.py` | • Generate multi-dimensional per-node telemetry with failure trends.<br>• Compute CPI and TTS health indicators.<br>• Train LightGBM model to predict node failure probability P_fail.<br>• Maintain 15-bin Co-location Interference Matrix with EMA (α=0.1).<br>• **Deliverables**:<br>  `score_node_failure(node_id, telemetry) → Pfail`<br>  `get_interference(type_i, type_j) → IS` |
-| **Person C** | `fusion/fusion_engine.py`<br>`simulator/baselines.py`<br>`main.py` | • Compute composite node placement score S(i) = α(1−P_fail) + β(1−IS) + γ(1−U).<br>• Calculate target replicas K = ⌈predicted_load / capacity⌉.<br>• Execute 60s window control loop with EMA feedback.<br>• Implement Reactive HPA and LSTM Round-Robin baselines.<br>• End-to-end integration of all modules. |
+| **Person C (Aman)** | `fusion/fusion_engine.py`<br>`simulator/baselines.py`<br>`main.py` | • Compute composite node placement score S(i) = α(1−P_fail) + β(1−IS) + γ(1−U).<br>• Calculate target replicas K = ⌈predicted_load / capacity⌉.<br>• Execute 60s window control loop with EMA feedback.<br>• Implement Reactive HPA and LSTM Round-Robin baselines.<br>• End-to-end integration of all modules. |
 
 ---
 
