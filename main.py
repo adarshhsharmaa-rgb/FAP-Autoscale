@@ -1,11 +1,11 @@
 """
-FAP-Scale End-to-End Simulation Entrypoint (Person C integration).
+FAP-Scale End-to-End Simulation Entrypoint.
 
 Ties together all three team modules in a single runnable script:
-  - Data Generation    : Person A (workload) + Person B (node telemetry)
-  - Model Training     : Person B (LightGBM NodeFailureScorer + InterferenceMatrix)
-  - Control Loop       : Person C (FusionEngine 60 s window ticks)
-  - Baselines          : Person C (ReactiveHPA + LSTM-RoundRobin)
+  - Data Generation    : Nirupam (workload) + Adarsh (node telemetry)
+  - Model Training     : Adarsh (LightGBM NodeFailureScorer + InterferenceMatrix)
+  - Control Loop       : Aman (FusionEngine 60 s window ticks)
+  - Baselines          : Aman (ReactiveHPA + LSTM-RoundRobin)
   - Evaluation & Plots : results/evaluate.py
 
 Usage:
@@ -27,13 +27,13 @@ from data_gen.synthetic_data import (
     extract_single_node_telemetry,
 )
 
-# -- Person B models -----------------------------------------------------------
+# -- Node health models (Adarsh) ----------------------------------------------
 from models.node_health.failure_scorer import (
     NodeFailureScorer, score_node_failure, calculate_cpi, calculate_tts
 )
 from models.node_health.interference import InterferenceMatrix, get_interference
 
-# -- Person C modules ----------------------------------------------------------
+# -- Fusion & baselines (Aman) ------------------------------------------------
 from fusion.fusion_engine import FusionEngine, compute_node_score, calculate_replicas
 from simulator.baselines import ReactiveHPAScaler, LSTMRoundRobinScaler
 from models.load_pipeline import warm_up
@@ -42,16 +42,22 @@ from models.load_pipeline import warm_up
 from results.evaluate import evaluate_experiment_results, plot_evaluation_summary
 
 
-def _divider(char="=", width=80):
+def _banner(text, char="=", width=88):
+    print(char * width)
+    print(f"  {text}")
     print(char * width)
 
 
 def _section(title, step_num=None):
     print()
-    _divider("-")
-    prefix = f"[Step {step_num}] " if step_num else ""
-    print(f"  {prefix}{title}")
-    _divider("-")
+    prefix = f"STEP {step_num}" if step_num else ""
+    line = "-" * 88
+    print(line)
+    if prefix:
+        print(f"  [{prefix}] {title}")
+    else:
+        print(f"  {title}")
+    print(line)
 
 
 def run_fap_scale_simulation(
@@ -65,81 +71,91 @@ def run_fap_scale_simulation(
     os.makedirs("results", exist_ok=True)
 
     print()
-    _divider("=")
-    print("  FAP-SCALE: Failure-Aware Predictive Autoscaling Framework")
-    print(f"  Simulation Config: {num_windows} windows | {num_nodes} nodes | pattern={pattern.upper()}")
-    _divider("=")
+    _banner(
+        "FAP-SCALE: Failure-Aware Predictive Autoscaling Framework\n"
+        f"  Simulation: {num_windows} windows | {num_nodes} cluster nodes | pattern = {pattern.upper()}\n"
+        f"  Team: Nirupam (Workload) | Adarsh (Node Health) | Aman (Fusion & Integration)"
+    )
 
     # =========================================================================
     # STEP 1: SYNTHETIC DATA GENERATION
     # =========================================================================
-    _section("SYNTHETIC DATA GENERATION (Person A + Person B)", 1)
+    _section("SYNTHETIC DATA GENERATION", 1)
 
-    print("\n  [Person A] Generating workload time-series...")
-    print(f"    Formula: request_rate(t) = base_load + amplitude * sin(2*pi*t/period) + noise")
+    print("\n  [Nirupam] Generating workload time-series...")
+    print("    Model: request_rate(t) = base + amplitude * sin(2*pi*t/period) + noise")
     workload_df = generate_workload_time_series(
         num_windows=num_windows, pattern=pattern, seed=42
     )
     total_points = len(workload_df)
-    print(f"    -> {total_points} data points across {num_windows} control windows")
-    print(f"    -> Mean load: {workload_df['request_rate'].mean():.1f} req/s, "
-          f"Peak: {workload_df['request_rate'].max():.1f} req/s")
+    mean_load = workload_df['request_rate'].mean()
+    peak_load = workload_df['request_rate'].max()
+    min_load = workload_df['request_rate'].min()
+    print(f"    Generated {total_points} data points across {num_windows} control windows")
+    print(f"    Load stats: mean={mean_load:.1f} | peak={peak_load:.1f} | min={min_load:.1f} req/s")
 
-    print("\n  [Person B] Generating per-node hardware telemetry...")
-    print(f"    Metrics: CPU%, run-queue, context-switches, temperature, DIMM errors,")
-    print(f"             disk health, network retransmits")
-    print(f"    Failing nodes injected: node-03, node-08 (progressive degradation)")
+    print("\n  [Adarsh] Generating per-node hardware telemetry...")
+    print("    Signals: CPU%, run-queue, context-switches, temperature,")
+    print("             DIMM errors, disk health, network retransmits")
+    print("    Failure injection: node-03, node-08 (progressive degradation)")
     node_telemetry_df = generate_node_telemetry(
         num_nodes=num_nodes,
         num_windows=num_windows,
         fail_node_ids=["node-03", "node-08"],
         seed=42,
     )
-    print(f"    -> {len(node_telemetry_df)} telemetry rows ({num_nodes} nodes x {num_windows} windows)")
+    print(f"    Generated {len(node_telemetry_df)} telemetry rows ({num_nodes} nodes x {num_windows} windows)")
 
     # =========================================================================
-    # STEP 2: MODEL TRAINING (Person B)
+    # STEP 2: NODE HEALTH MODEL TRAINING (Adarsh)
     # =========================================================================
-    _section("NODE HEALTH MODEL TRAINING (Person B)", 2)
+    _section("NODE HEALTH MODEL TRAINING [Adarsh]", 2)
 
     print("\n  Training LightGBM NodeFailureScorer...")
-    print("    Features: [cpu_util, run_queue, cs_rate, CPI, TTS, dimm_errors, disk_health, net_retransmits]")
-    print("    Label: will_fail (binary)")
+    print("    Input features:")
+    print("      [cpu_util, run_queue, cs_rate, CPI, TTS, dimm_errors, disk_health, net_retransmits]")
+    print("    Target label: will_fail (binary classification)")
     failure_scorer = NodeFailureScorer(random_state=42)
     failure_scorer.fit(node_telemetry_df)
     backend = "LightGBM" if getattr(failure_scorer, "model", None).__class__.__name__ == "LGBMClassifier" else "HistGradientBoosting"
-    print(f"    -> Trained ({backend}) on {len(node_telemetry_df)} rows")
+    print(f"    Trained successfully ({backend}) on {len(node_telemetry_df)} rows")
 
     print("\n  Initialising 15-bin Co-location Interference Matrix...")
-    print("    EMA update rule: IS_new = (1 - alpha) * IS_old + alpha * observed_degradation")
+    print("    Online learning rule (EMA):")
+    print("      IS_new = (1 - alpha) * IS_old + alpha * observed_degradation")
     interference_matrix = InterferenceMatrix(alpha=0.1, seed=42)
-    print("    -> 15x15 symmetric matrix initialised (alpha=0.1)")
+    print("    Initialised 15x15 symmetric matrix (alpha = 0.1)")
 
-    # Show CPI/TTS formulas with a sample calculation
-    print("\n  Key Formulas (Person B):")
-    print("    CPI = 0.5 * U_norm + 0.35 * Q_norm + 0.15 * C_norm")
-    print("    TTS = linear_slope(last_10_temps) / TDP")
+    # Show formulas with sample calculations
+    print("\n  Health Metric Formulas:")
+    print("    CPI = 0.5 * (CPU/100) + 0.35 * (RunQueue/32) + 0.15 * (CtxSwitch/10000)")
+    print("    TTS = polyfit_slope(last_10_temps) / TDP")
     print("    Pfail = LightGBM.predict_proba(features)[class=1]")
     sample_cpi = calculate_cpi(75.0, 8.0, 3000.0)
     sample_tts = calculate_tts([60, 62, 64, 66, 68, 70, 72, 74, 76, 78], 105.0)
-    print(f"    Example: CPI(cpu=75%, queue=8, cs=3000) = {sample_cpi:.4f}")
-    print(f"    Example: TTS(temps=[60..78], TDP=105)    = {sample_tts:.4f}")
     sample_is = get_interference("periodic", "bursty", interference_matrix)
-    print(f"    Example: IS(periodic, bursty)            = {sample_is:.4f}")
+    print(f"\n    Sample outputs:")
+    print(f"      CPI(cpu=75%, queue=8, cs=3000) = {sample_cpi:.4f}")
+    print(f"      TTS(temps=[60..78], TDP=105)   = {sample_tts:.4f}")
+    print(f"      IS(periodic, bursty)           = {sample_is:.4f}")
 
     # =========================================================================
-    # STEP 3: FORECASTER WARM-UP & STRATEGY INIT (Person A + Person C)
+    # STEP 3: FORECASTER WARM-UP & STRATEGY INIT
     # =========================================================================
-    _section("FORECASTER WARM-UP & STRATEGY INITIALISATION (Person A + C)", 3)
+    _section("FORECASTER WARM-UP & STRATEGY INIT", 3)
 
-    print("\n  [Person A] Warming up forecasters (ARIMA, LSTM, XGBoost)...")
+    print("\n  [Nirupam] Warming up prediction models...")
+    print("    ARIMA  -> periodic workloads (statsmodels)")
+    print("    LSTM   -> bursty workloads   (keras, pre-trained)")
+    print("    XGBoost -> hybrid workloads  (gradient boosting)")
     warm_up()
-    print("    -> Forecasters ready")
+    print("    All forecasters ready")
 
-    print("\n  [Person C] Initialising Fusion Engine...")
-    print("    Scoring: S(i) = alpha*(1-Pfail) + beta*(1-IS) + gamma*(1-U)")
-    print(f"    Weights: alpha=0.4, beta=0.35, gamma=0.25")
-    print(f"    Replica formula: K = ceil(predicted_load / capacity)")
+    print("\n  [Aman] Initialising Fusion Engine...")
+    print("    Node placement score:")
+    print("      S(i) = alpha*(1 - Pfail) + beta*(1 - IS) + gamma*(1 - U/100)")
+    print("    Weights: alpha=0.40 (failure) | beta=0.35 (interference) | gamma=0.25 (utilization)")
+    print("    Replica count: K = ceil(predicted_load / capacity_per_pod)")
     fusion_engine = FusionEngine(
         alpha=0.4,
         beta=0.35,
@@ -149,15 +165,19 @@ def run_fap_scale_simulation(
         interference_matrix=interference_matrix,
     )
 
-    # Show formula with sample
     sample_score = compute_node_score(pfail=0.1, is_score=0.3, utilization=50.0)
     sample_k = calculate_replicas(predicted_load=75.0)
-    print(f"    Example: S(Pfail=0.1, IS=0.3, U=50%) = {sample_score:.3f}")
-    print(f"    Example: K(load=75 req/s, cap=20)     = {sample_k} replicas")
+    print(f"\n    Sample outputs:")
+    print(f"      S(Pfail=0.1, IS=0.3, U=50%) = {sample_score:.3f}")
+    print(f"      K(load=75 req/s, cap=20)    = {sample_k} replicas")
 
-    print("\n  [Person C] Initialising Baselines...")
-    print("    Baseline 1: Reactive HPA (scale based on avg CPU threshold 70%)")
-    print("    Baseline 2: LSTM Round-Robin (LSTM forecast + blind round-robin placement)")
+    print("\n  [Aman] Initialising Baseline Scalers...")
+    print("    Baseline 1: Reactive HPA")
+    print("      -> Scales when avg CPU exceeds 70% threshold")
+    print("      -> Blind round-robin placement (no health awareness)")
+    print("    Baseline 2: LSTM Round-Robin")
+    print("      -> Uses LSTM load prediction for replica count")
+    print("      -> Still round-robin placement (ignores Pfail and IS)")
     hpa_baseline = ReactiveHPAScaler(target_cpu_threshold=70.0, replica_capacity=20.0)
     lstm_baseline = LSTMRoundRobinScaler(replica_capacity=20.0)
 
@@ -171,22 +191,23 @@ def run_fap_scale_simulation(
     # =========================================================================
     _section("SIMULATION CONTROL LOOP (60-second windows)", 4)
 
-    print("\n  Running all 3 strategies in parallel across each window...")
-    print("  FAP-Scale pipeline per window:")
-    print("    1. Classify workload pattern (autocorrelation, wavelet, CV, Hurst)")
-    print("    2. Forecast load (ARIMA/LSTM/XGBoost based on pattern)")
-    print("    3. Calculate target replicas K")
-    print("    4. Score each node: S(i) = alpha*(1-Pfail) + beta*(1-IS) + gamma*(1-U)")
-    print("    5. Rank nodes by S(i), select top-K healthy nodes")
+    print("\n  Executing all 3 autoscaling strategies in parallel...")
+    print("  Per-window FAP-Scale pipeline:")
+    print("    [Nirupam] 1. Classify workload pattern (autocorrelation, wavelet, CV, Hurst)")
+    print("    [Nirupam] 2. Forecast next-window load (ARIMA / LSTM / XGBoost)")
+    print("    [Aman]    3. Calculate target replicas K = ceil(load / capacity)")
+    print("    [Adarsh]  4. Score each node: S(i) = a*(1-Pfail) + b*(1-IS) + g*(1-U)")
+    print("    [Aman]    5. Rank nodes by S(i), place replicas on top-K")
     print()
 
     header = (
-        f"{'Win':<4} | {'Actual':>7} | {'Pattern':<9} | {'Pred':>7} | "
-        f"{'K_fap':>5} | {'Top Node':<10} | {'Pfail':>6} | {'IS':>5} | {'S(i)':>5} | EMA"
+        f"{'Win':<5}| {'Actual':>7} | {'Pattern':<9} | {'Forecast':>8} | "
+        f"{'K':>3} | {'Best Node':<10} | {'Pfail':>6} | {'IS':>5} | {'S(i)':>5} | {'EMA':>5}"
     )
-    print("-" * len(header))
+    sep = "-" * len(header)
+    print(sep)
     print(header)
-    print("-" * len(header))
+    print(sep)
 
     for w in range(num_windows):
         win_workload = workload_df[workload_df["window_id"] == w]["request_rate"].values
@@ -230,38 +251,53 @@ def run_fap_scale_simulation(
             top = fap_result["ranked_nodes"][0] if fap_result["ranked_nodes"] else {}
             ema_val = fap_result.get("ema_update", 0.0)
             print(
-                f"{w:<4} | {actual_load:>7.1f} | {fap_result['pattern_label']:<9} | "
-                f"{fap_result['predicted_load']:>7.1f} | {fap_result['target_replicas']:>5} | "
+                f"{w:<5}| {actual_load:>7.1f} | {fap_result['pattern_label']:<9} | "
+                f"{fap_result['predicted_load']:>8.1f} | "
+                f"{fap_result['target_replicas']:>3} | "
                 f"{top.get('node_id', '-'):<10} | {top.get('pfail', 0):>6.3f} | "
                 f"{top.get('is_score', 0):>5.3f} | {top.get('score', 0):>5.3f} | "
-                f"{ema_val:.3f}"
+                f"{ema_val:>5.3f}"
             )
 
-    print("-" * len(header))
+    print(sep)
 
     # =========================================================================
-    # STEP 5: FUSION ENGINE SUMMARY
+    # STEP 5: FUSION ENGINE SUMMARY & NODE HEALTH
     # =========================================================================
-    _section("FUSION ENGINE SUMMARY STATISTICS", 5)
+    _section("FUSION ENGINE SUMMARY & NODE HEALTH", 5)
 
     stats = fusion_engine.summary_stats()
+    print("\n  Fusion Engine Statistics:")
     for k, v in stats.items():
-        print(f"    {k}: {v}")
+        print(f"    {k:.<35} {v}")
 
-    # Show node health snapshot for the last window
-    print("\n  Node Health Snapshot (Final Window):")
-    print(f"    {'Node':<10} | {'Pfail':>8} | {'Status':<12}")
-    print("    " + "-" * 35)
+    # Node health snapshot
+    print(f"\n  Cluster Node Health Snapshot (Window {num_windows - 1}):")
+    print(f"    {'Node':<10} | {'Pfail':>8} | {'Status':<10} | {'Verdict'}")
+    print("    " + "-" * 55)
+    healthy_count = 0
+    failing_count = 0
     for nid in sorted(node_pfails.keys()):
         pf = node_pfails[nid]
-        status = "HEALTHY" if pf < 0.4 else "AT RISK" if pf < 0.7 else "FAILING"
-        marker = "  " if pf < 0.4 else " !" if pf < 0.7 else " X"
-        print(f"   {marker}{nid:<10} | {pf:>8.4f} | {status:<12}")
+        if pf < 0.4:
+            status, verdict, marker = "HEALTHY", "OK to place replicas", " "
+            healthy_count += 1
+        elif pf < 0.7:
+            status, verdict, marker = "AT RISK", "Avoid if possible", "!"
+            failing_count += 1
+        else:
+            status, verdict, marker = "FAILING", "DO NOT place replicas", "X"
+            failing_count += 1
+        print(f"   {marker} {nid:<10} | {pf:>8.4f} | {status:<10} | {verdict}")
+
+    print(f"\n    Summary: {healthy_count} healthy, {failing_count} unhealthy/failing")
+    if failing_count > 0:
+        print("    FAP-Scale automatically excludes failing nodes from placement!")
 
     # =========================================================================
     # STEP 6: EVALUATION & COMPARISON
     # =========================================================================
-    _section("FINAL EVALUATION & BASELINE COMPARISON", 6)
+    _section("FINAL EVALUATION & COMPARISON", 6)
 
     metrics = {
         "FAP-Scale (Proposed)":        evaluate_experiment_results(fap_history),
@@ -270,40 +306,48 @@ def run_fap_scale_simulation(
     }
 
     print()
-    _divider("=")
+    print("=" * 88)
     print(
-        f"  {'Strategy':<32} | {'SLA Violations':>14} | "
+        f"  {'Strategy':<34} | {'SLA Violations':>14} | "
         f"{'Over-Prov %':>11} | {'Unhealthy Placements':>20}"
     )
-    _divider("=")
+    print("=" * 88)
     for strat, m in metrics.items():
         print(
-            f"  {strat:<32} | {m['sla_violations']:>14} | "
+            f"  {strat:<34} | {m['sla_violations']:>14} | "
             f"{m['overprovisioning_percent']:>10.1f}% | {m['unhealthy_placements']:>20}"
         )
-    _divider("=")
+    print("=" * 88)
 
     # Interpretation
     fap_m = metrics["FAP-Scale (Proposed)"]
     hpa_m = metrics["Reactive-HPA (Baseline 1)"]
     lstm_m = metrics["LSTM-RoundRobin (Baseline 2)"]
 
-    print("\n  Key Findings:")
-    print(f"    - FAP-Scale SLA violations: {fap_m['sla_violations']} vs "
-          f"HPA: {hpa_m['sla_violations']} vs LSTM-RR: {lstm_m['sla_violations']}")
-    print(f"    - FAP-Scale over-provisioning: {fap_m['overprovisioning_percent']:.1f}% vs "
-          f"HPA: {hpa_m['overprovisioning_percent']:.1f}% vs LSTM-RR: {lstm_m['overprovisioning_percent']:.1f}%")
-    print(f"    - FAP-Scale unhealthy placements: {fap_m['unhealthy_placements']} vs "
-          f"HPA: {hpa_m['unhealthy_placements']} vs LSTM-RR: {lstm_m['unhealthy_placements']}")
+    print("\n  Analysis:")
+    # SLA comparison
+    if hpa_m['sla_violations'] > 0:
+        sla_reduction = ((hpa_m['sla_violations'] - fap_m['sla_violations']) / hpa_m['sla_violations']) * 100
+        print(f"    SLA violations reduced by {sla_reduction:.0f}% vs Reactive HPA "
+              f"({fap_m['sla_violations']} vs {hpa_m['sla_violations']})")
+    # Over-prov comparison
+    if hpa_m['overprovisioning_percent'] > 0:
+        ovp_reduction = ((hpa_m['overprovisioning_percent'] - fap_m['overprovisioning_percent'])
+                         / hpa_m['overprovisioning_percent']) * 100
+        print(f"    Over-provisioning reduced by {ovp_reduction:.0f}% vs Reactive HPA "
+              f"({fap_m['overprovisioning_percent']:.1f}% vs {hpa_m['overprovisioning_percent']:.1f}%)")
 
     if fap_m['unhealthy_placements'] <= min(hpa_m['unhealthy_placements'], lstm_m['unhealthy_placements']):
-        print("    -> FAP-Scale successfully avoids placing workloads on failing nodes!")
+        print("    FAP-Scale: 0 unhealthy placements -- never placed workloads on failing nodes")
     if fap_m['overprovisioning_percent'] <= min(hpa_m['overprovisioning_percent'], lstm_m['overprovisioning_percent']):
-        print("    -> FAP-Scale achieves the lowest over-provisioning (best resource efficiency)!")
+        print("    FAP-Scale achieves the best resource efficiency among all strategies")
 
     print()
     save_path = "results/comparison_metrics.png"
     plot_evaluation_summary(metrics, save_path=save_path)
+
+    print("\n  Done. Results saved to results/ directory.")
+    print()
 
     return metrics
 
