@@ -230,30 +230,30 @@ def generate_node_telemetry(
 
     for w in range(num_windows):
         for nid, st in node_states.items():
-            deg_factor = (w / num_windows) if st["degrading"] else 0.0
+            deg_factor = ((w / num_windows) ** 0.6) * 1.5 if st["degrading"] else 0.0
 
             cpu_util = float(np.clip(
                 st["base_cpu"] + deg_factor * 40 + np.random.normal(0, 5),
                 5, 98))
             run_q = float(np.clip(
-                2 + deg_factor * 12 + np.random.exponential(1.5),
+                2 + deg_factor * 15 + np.random.exponential(1.5),
                 0, 30))
             cs_rate = float(np.clip(
-                1000 + deg_factor * 3000 + np.random.normal(0, 200),
+                1000 + deg_factor * 4000 + np.random.normal(0, 200),
                 0, 10000))
 
             latest_temp = float(np.clip(
-                st["temp_history"][-1] + deg_factor * 3 + np.random.normal(0, 1.5),
+                st["temp_history"][-1] + deg_factor * 4 + np.random.normal(0, 1.5),
                 35, 95))
             st["temp_history"].append(latest_temp)
             if len(st["temp_history"]) > 20:
                 st["temp_history"].pop(0)
 
-            dimm_errs = 0 if (np.random.rand() > 0.05 or not st["degrading"]) else 1
-            disk_h = float(np.clip(1.0 - deg_factor * 0.3, 0.1, 1.0))
-            net_ret = int(np.random.randint(0, max(2, int(5 + deg_factor * 20))))
+            dimm_errs = 0 if (np.random.rand() > 0.15 or not st["degrading"]) else 1
+            disk_h = float(np.clip(1.0 - deg_factor * 0.5, 0.1, 1.0))
+            net_ret = int(np.random.randint(0, max(2, int(5 + deg_factor * 25))))
 
-            will_fail = st["degrading"] and (w > num_windows * 0.7) and (np.random.rand() > 0.5)
+            will_fail = st["degrading"] and (w > num_windows * 0.3) and (np.random.rand() > 0.3)
 
             records.append({
                 "node_id": nid,
