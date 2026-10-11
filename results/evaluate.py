@@ -12,6 +12,46 @@ from typing import Dict, List, Any
 import numpy as np
 
 
+def summarize_run(log) -> Dict[str, Any]:
+    """
+    Metrics of one trace-driven run (the per-window log of
+    simulator.cluster.ClusterSimulator.run).
+
+        sla_violations            windows where the capacity actually delivered
+                                  (replicas that were up, minus what interference
+                                  cost them) was below the demand
+        sla_violation_percent     the same as a share of all windows
+        unserved_percent          share of the total demand that found no capacity
+        overprovisioning_percent  share of the capacity paid for that went unused,
+                                  sum(max(0, nominal - demand)) / sum(nominal)
+        avg_replicas              mean number of running replicas (the cost)
+        replicas_lost             replicas that were on a node when it died
+        unhealthy_placements      replicas placed on a node that then died within
+                                  the failure horizon (ground truth from the trace)
+        placements, drained       replicas started / moved off a node pre-emptively
+    """
+    nominal = log["nominal"].to_numpy(dtype=float)
+    load = log["load"].to_numpy(dtype=float)
+    return {
+        "total_windows": int(len(log)),
+        "sla_violations": int(log["violation"].sum()),
+        "sla_violation_percent": float(100.0 * log["violation"].mean()),
+        "unserved_percent": float(100.0 * log["unserved"].sum() / max(load.sum(), 1e-12)),
+        "overprovisioning_percent": float(100.0 * np.clip(nominal - load, 0, None).sum()
+                                          / max(nominal.sum(), 1e-12)),
+        "avg_replicas": float(log["replicas"].mean()),
+        "replicas_lost": int(log["lost"].sum()),
+        "unhealthy_placements": int(log["unhealthy_placed"].sum()),
+        "placements": int(log["placed"].sum()),
+        "drained": int(log["drained"].sum()),
+    }
+
+
+def _fmt(val) -> str:
+    """Bar label: whole numbers without decimals, averages with one."""
+    return str(int(round(val))) if abs(val - round(val)) < 1e-9 else f"{val:.1f}"
+
+
 def evaluate_experiment_results(
     decision_history: List[Dict[str, Any]],
     replica_capacity: float = 20.0
@@ -121,7 +161,7 @@ def plot_evaluation_summary(metrics_by_strategy: Dict[str, Dict[str, Any]], save
         # Add value labels on bars
         for bar, val in zip(bars1, sla):
             axes[0].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
-                         str(int(val)), ha="center", va="bottom", fontweight="bold", fontsize=11)
+                         _fmt(val), ha="center", va="bottom", fontweight="bold", fontsize=11)
 
         # --- Chart 2: Over-Provisioning % ---
         bars2 = axes[1].bar(short_labels, overprov, color=colors, edgecolor="white", linewidth=1.2)
@@ -142,7 +182,7 @@ def plot_evaluation_summary(metrics_by_strategy: Dict[str, Dict[str, Any]], save
         axes[2].yaxis.set_major_locator(plt.MaxNLocator(integer=True))
         for bar, val in zip(bars3, unhealthy):
             axes[2].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                         str(int(val)), ha="center", va="bottom", fontweight="bold", fontsize=11)
+                         _fmt(val), ha="center", va="bottom", fontweight="bold", fontsize=11)
 
         # Rotate x-axis labels slightly for readability
         for ax in axes:

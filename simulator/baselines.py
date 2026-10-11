@@ -15,13 +15,21 @@ Two comparison baselines for FAP-Scale evaluation:
 
 Both baselines expose the same `evaluate_window()` interface as FusionEngine so they can
 be dropped into the simulation control loop unchanged.
+
+For the trace-driven simulation (simulator/cluster.py) each baseline also has a
+`desired_replicas()` method. ReactiveHPAScaler.desired_replicas() follows the
+Kubernetes HPA controller: the usage-ratio formula, the 10 % tolerance band and
+the 5-minute scale-down stabilisation window. LSTMRoundRobinScaler gets the
+same forecast safety margin as FAP-Scale, so the two predictive scalers differ
+only in model selection and placement, not in how cautious they are.
 """
 
 import math
-from typing import Dict, List, Any, Tuple
+from collections import deque
+from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
 
-from models.load_pipeline import forecast_with_model
+from models.load_pipeline import forecast_with_model, ForecastMargin
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,12 +55,56 @@ class ReactiveHPAScaler:
         history:              Per-window decision log.
     """
 
-    def __init__(self, target_cpu_threshold: float = 70.0, replica_capacity: float = 20.0):
+    TOLERANCE = 0.1   # kube-controller-manager --horizontal-pod-autoscaler-tolerance
+
+    def __init__(self, target_cpu_threshold: float = 70.0, replica_capacity: float = 20.0,
+                 stabilization_windows: int = 5):
         self.target_cpu_threshold = target_cpu_threshold
         self.replica_capacity = replica_capacity
         self.current_replicas: int = 2
         self.rr_index: int = 0
         self.history: List[Dict[str, Any]] = []
+        # scale-down stabilisation: 300 s by default = 5 control windows
+        self.stabilization_windows = stabilization_windows
+        self._recommendations: deque = deque(maxlen=max(1, stabilization_windows))
+
+    def desired_replicas(self, utilization: float, ready_replicas: int, total_replicas: int) -> int:
+        """
+        One pass of the Kubernetes HPA algorithm.
+
+            desired = ceil(readyReplicas * currentUtilization / targetUtilization)
+
+        Args:
+            utilization:    Average utilisation of the ready replicas, in %.
+            ready_replicas: Replicas serving traffic (the ones the metric covers).
+            total_replicas: Replicas the Deployment counts, including ones still starting.
+
+        Rules taken from the controller:
+          * within +-10 % of the target nothing changes;
+          * on scale-up, replicas that are not ready yet are assumed to use 0 %,
+            so capacity already on its way is not requested twice;
+          * on scale-down, they are assumed to be needed;
+          * a scale-down only goes as low as the highest recommendation of the
+            last 5 minutes.
+        """
+        ratio = utilization / self.target_cpu_threshold
+        starting = max(0, total_replicas - ready_replicas)
+        if abs(ratio - 1.0) <= self.TOLERANCE or ready_replicas == 0:
+            recommendation = total_replicas
+        elif ratio > 1.0:
+            recommendation = max(total_replicas, math.ceil(ready_replicas * ratio))
+        else:
+            recommendation = min(total_replicas, math.ceil(ready_replicas * ratio) + starting)
+        recommendation = max(1, recommendation)
+
+        self._recommendations.append(recommendation)
+        desired = total_replicas
+        if total_replicas < recommendation:                 # scale up at once
+            desired = recommendation
+        elif total_replicas > max(self._recommendations):   # scale down, stabilised
+            desired = max(self._recommendations)
+        self.current_replicas = max(1, desired)
+        return self.current_replicas
 
     def evaluate_window(
         self,
@@ -112,6 +164,7 @@ class ReactiveHPAScaler:
         self.current_replicas = 2
         self.rr_index = 0
         self.history = []
+        self._recommendations.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,10 +186,16 @@ class LSTMRoundRobinScaler:
         history:          Per-window decision log.
     """
 
-    def __init__(self, replica_capacity: float = 20.0):
+    def __init__(self, replica_capacity: float = 20.0, margin: Optional[ForecastMargin] = None):
         self.replica_capacity = replica_capacity
+        self.margin = margin
         self.rr_index: int = 0
         self.history: List[Dict[str, Any]] = []
+
+    def desired_replicas(self, predicted_load: float, workload_window=None) -> int:
+        """K = ceil((LSTM forecast + safety margin) / capacity); blind to where replicas run."""
+        buffer = self.margin.value(workload_window) if self.margin is not None else 0.0
+        return max(1, math.ceil((predicted_load + buffer) / self.replica_capacity))
 
     def evaluate_window(
         self,
@@ -189,3 +248,5 @@ class LSTMRoundRobinScaler:
         """Reset scaler state."""
         self.rr_index = 0
         self.history = []
+        if self.margin is not None:
+            self.margin.reset()

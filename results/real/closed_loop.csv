@@ -1,0 +1,4 @@
+strategy,sla_violations_mean,sla_violations_std,sla_violation_percent_mean,sla_violation_percent_std,unserved_percent_mean,unserved_percent_std,overprovisioning_percent_mean,overprovisioning_percent_std,avg_replicas_mean,avg_replicas_std,replicas_lost_mean,replicas_lost_std,unhealthy_placements_mean,unhealthy_placements_std,placements_mean,placements_std,drained_mean,drained_std
+FAP-Scale,52.25,2.489,4.047,0.193,1.212,0.033,44.58,0.029,12.438,0.007,0.25,0.444,4.6,4.784,710.3,5.459,0.5,0.607
+Reactive-HPA,70.3,1.593,5.445,0.123,1.152,0.052,51.61,0.2,14.186,0.06,1.75,1.251,10.65,2.815,448.5,11.232,0.0,0.0
+LSTM-RoundRobin,100.4,3.676,7.777,0.285,2.277,0.085,40.17,0.015,11.506,0.003,1.25,1.02,14.4,4.083,534.1,0.308,0.0,0.0
