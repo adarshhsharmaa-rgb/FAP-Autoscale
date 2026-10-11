@@ -17,3 +17,6 @@ results/*.png
 *.swp
 *.swo
 *~
+
+# Raw datasets are downloaded by traces/ and never committed
+data/raw/
