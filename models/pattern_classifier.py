@@ -52,6 +52,7 @@ def autocorr_peak_count(window, threshold=ACF_PEAK_THRESHOLD, max_lag=72):
     x = np.asarray(window, dtype=float)
     nlags = int(min(max_lag, len(x) // 2))
     r = _acf(x, nlags)
+    r = np.nan_to_num(r)
     peaks = 0
     for k in range(2, len(r) - 1):
         if r[k] > threshold and r[k] >= r[k - 1] and r[k] >= r[k + 1]:
@@ -119,10 +120,15 @@ def hurst_exponent(window):
     if compute_Hc is not None and len(x) >= 100:
         try:
             H, _, _ = compute_Hc(x, kind="change", simplified=True)
-            return float(H)
+            if np.isfinite(H):
+                return float(H)
         except Exception:
             pass
-    return _hurst_rs(np.diff(x))
+    try:
+        H = _hurst_rs(np.diff(x))
+    except Exception:  # real traces have long idle stretches: too few non-flat segments
+        H = float("nan")
+    return H if np.isfinite(H) else 0.5
 
 
 # --------------------------------------------------------------------------- #
