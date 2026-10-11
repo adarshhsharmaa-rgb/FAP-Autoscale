@@ -50,3 +50,33 @@ replica in the same units, e.g. `replica_capacity = 5.0` means one replica handl
 ## Note for Person B
 `data_gen/synthetic_data.py` has a placeholder `generate_node_telemetry()` at the bottom. Replace
 it with your generator; nothing in the load side depends on it.
+
+## Real traces (added for Review 3)
+
+The calls above are unchanged. Running on the GenTD26 trace adds four things.
+
+```python
+from models.load_pipeline import (warm_up, rolling_forecasts, add_dynamic_selection,
+                                  DynamicSelector, ForecastMargin)
+from traces import gentd26
+
+warm_up(real=True)                          # LSTM trained on the GenTD26 request log
+load = gentd26.load().series("qps_total")   # 1441 windows x 57 s, anonymised QPS
+
+table = rolling_forecasts(load, start=150, window=150, horizon=2)   # ~9 min, cached in results/real/
+table = add_dynamic_selection(table)        # adds Dynamic, Static, routed_to
+```
+
+| name | what it is |
+|---|---|
+| `warm_up(real=True)` | activates `models/artifacts/lstm_gentd26.pt` (train it with `python -m models.train_real`) instead of the LSTM trained on synthetic bursty series |
+| `rolling_forecasts(series, start, window, horizon)` | replays the control loop over a series and records every forecaster's prediction at every window, plus what then happened. The forecasters are slow, so the simulator reads this table instead of calling them |
+| `DynamicSelector` | dynamic model selection with feedback. Starts from the routing table above, scores every model after each window, and blends them with weight proportional to (1 / tracked error)^4. `add_dynamic_selection(table)` applies it to a table without ever using a later outcome for an earlier choice |
+| `ForecastMargin(quantile)` | safety buffer = that quantile of the forecaster's recent shortfalls (actual - predicted). Scale for `predicted_load + margin.value()` |
+
+`classify_and_forecast` now returns the last value with `backend = "last value (flat window)"`
+when the window is constant (an idle service), instead of failing on degenerate statistics.
+
+### Units on the real trace
+Load is anonymised gateway QPS (peak about 9.6). One replica's capacity is read off the trace,
+`gentd26.load().replica_capacity()` = 0.34 QPS per saturated GPU pod, so the peak needs about 28 replicas.
