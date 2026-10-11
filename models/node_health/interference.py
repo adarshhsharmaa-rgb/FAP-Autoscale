@@ -3,8 +3,14 @@ Co-location Interference Matrix (Person B implementation).
 
 Maintains a 15-bin interference matrix representing cross-workload resource contention
 (Last-Level Cache, Memory Bandwidth, I/O bandwidth) with Exponential Moving Average (EMA) updates.
+
+On real traces the 15 bins are workload profiles: 3 load patterns (periodic,
+bursty, hybrid) x 5 utilisation levels (see `profile_bin`). Entry [i, j] is the
+throughput a workload of profile i loses when it shares a host with profile j,
+learned online from the latency inflation observed in the trace.
 """
 
+from bisect import bisect_right
 from typing import Union, Optional
 import hashlib
 import numpy as np
@@ -20,16 +26,28 @@ class InterferenceMatrix:
 
     WORKLOAD_TYPES = ["periodic", "bursty", "hybrid", "cpu_heavy", "io_heavy"]
 
-    def __init__(self, alpha: float = 0.1, seed: int = 42):
+    # Workload profiles for real traces: pattern x utilisation level = 15 bins.
+    PATTERNS = ("periodic", "bursty", "hybrid")
+    LEVEL_EDGES = (1.0, 10.0, 30.0, 60.0)   # % utilisation: idle | light | moderate | busy | saturated
+    LEVEL_NAMES = ("idle", "light", "moderate", "busy", "saturated")
+
+    def __init__(self, alpha: float = 0.1, seed: int = 42, prior: Optional[float] = None):
         """
         Initialize 15-bin interference matrix with realistic co-location degradation weights.
 
         Args:
             alpha: EMA smoothing coefficient (default 0.1).
             seed: Random seed for initial matrix seed.
+            prior: If given, every entry starts at this value instead of the
+                seeded random matrix, so nothing is assumed before the first
+                observation and the matrix is learned purely from the trace.
         """
         self.alpha = alpha
         self.num_bins = 15
+        self.updates = np.zeros((self.num_bins, self.num_bins), dtype=int)
+        if prior is not None:
+            self.matrix = np.full((self.num_bins, self.num_bins), float(np.clip(prior, 0.0, 1.0)))
+            return
 
         # Initialize 15x15 matrix seeded with domain degradation values
         # Diagonal elements (same workload co-located) have higher contention (~0.3 - 0.6)
@@ -43,12 +61,30 @@ class InterferenceMatrix:
         # Ensure values stay in [0, 1]
         self.matrix = np.clip(self.matrix, 0.0, 1.0)
 
+    @classmethod
+    def profile_bin(cls, pattern: str, utilization: float) -> int:
+        """
+        Bin (0-14) of a workload profile: load pattern x utilisation level.
+
+        Args:
+            pattern: 'periodic', 'bursty' or 'hybrid' (anything else counts as hybrid).
+            utilization: The workload's recent utilisation in % (0-100).
+        """
+        p = cls.PATTERNS.index(pattern) if pattern in cls.PATTERNS else cls.PATTERNS.index("hybrid")
+        level = bisect_right(cls.LEVEL_EDGES, float(utilization))
+        return p * len(cls.LEVEL_NAMES) + level
+
+    @classmethod
+    def profile_name(cls, bin_id: int) -> str:
+        n = len(cls.LEVEL_NAMES)
+        return f"{cls.PATTERNS[bin_id // n]}/{cls.LEVEL_NAMES[bin_id % n]}"
+
     def _get_bin_index(self, type_identifier: Union[str, int]) -> int:
         """
         Convert string type or integer bin index to valid bin integer in [0, 14].
         """
-        if isinstance(type_identifier, int):
-            return type_identifier % self.num_bins
+        if isinstance(type_identifier, (int, np.integer)):
+            return int(type_identifier) % self.num_bins
         elif isinstance(type_identifier, str):
             clean_type = type_identifier.lower().strip()
             if clean_type in self.WORKLOAD_TYPES:
@@ -78,8 +114,8 @@ class InterferenceMatrix:
         """
         idx_i = self._get_bin_index(type_i)
         idx_j = self._get_bin_index(type_j)
-        score = self.matrix[idx_i, idx_j]
-        return float(np.clip(score, 0.0, 1.0))
+        score = float(self.matrix[idx_i, idx_j])
+        return min(1.0, max(0.0, score))
 
     def update_ema(
         self,
@@ -109,6 +145,9 @@ class InterferenceMatrix:
         # Maintain symmetry in co-location matrix
         self.matrix[idx_i, idx_j] = new_val
         self.matrix[idx_j, idx_i] = new_val
+        self.updates[idx_i, idx_j] += 1
+        if idx_i != idx_j:
+            self.updates[idx_j, idx_i] += 1
 
         return float(new_val)
 
