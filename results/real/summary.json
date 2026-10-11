@@ -1,0 +1,132 @@
+{
+  "datasets": {
+    "workload": "Alibaba GenTD26 (cluster-trace-v2026-GenAI), commit 8c132fb771",
+    "failures": "Backblaze Drive Stats Q2_2026 (2026-05-01 to 2026-06-30)"
+  },
+  "setup": {
+    "cluster_draws": 20,
+    "nodes": 72,
+    "failing_nodes_per_draw": 7,
+    "control_windows": 1291,
+    "window_seconds": 57,
+    "replica_capacity_qps": 0.3403,
+    "margin_quantile": 0.95,
+    "hpa_target_utilization": 70.0,
+    "forecast_horizon_windows": 2
+  },
+  "node_health": {
+    "test_drives": 1021,
+    "test_failed_drives": 173,
+    "test_drive_days": 55037,
+    "positive_drive_days": 894,
+    "roc_auc": 0.8907,
+    "pr_auc_sample": 0.2023,
+    "pr_auc_fleet": 0.0545,
+    "gate": 0.0275,
+    "recall_drive_days": 0.7181,
+    "false_alarm_drive_days": 0.0483,
+    "precision_sample": 0.2066,
+    "precision_fleet": 0.0031,
+    "failed_drives_with_warning_window": 162,
+    "failed_drives_caught": 0.7901,
+    "median_lead_days": 19.0,
+    "healthy_drives_ever_flagged": 0.0861,
+    "error_counters_nonzero_day_before_failure": 0.7143,
+    "error_counters_nonzero_healthy": 0.0608,
+    "train_drives": 3060,
+    "train_drive_days": 164898,
+    "calibration_drives": 1020,
+    "horizon_days": 7,
+    "dataset": "Backblaze Drive Stats Q2_2026 (2026-05-01 to 2026-06-30)"
+  },
+  "load_forecasting": {
+    "trace": "Alibaba GenTD26 gateway QPS, 57 s windows",
+    "windows": 1289,
+    "patterns_detected": {
+      "bursty": 644,
+      "hybrid": 475,
+      "periodic": 170
+    },
+    "nrmse_next_window": {
+      "Persistence": 0.2986,
+      "ARIMA": 0.2991,
+      "LSTM": 0.2957,
+      "XGBoost": 0.3455,
+      "Static": 0.3278,
+      "Dynamic": 0.2949
+    },
+    "best_single_model": "LSTM",
+    "dynamic_vs_best_single_pct": 0.29,
+    "dynamic_vs_fixed_routing_pct": 10.05,
+    "dynamic_vs_lstm_pct": 0.29,
+    "most_trusted_model_share": {
+      "LSTM": 0.581,
+      "ARIMA": 0.389,
+      "XGBoost": 0.029
+    },
+    "fixed_routing_table": {
+      "periodic": "ARIMA",
+      "bursty": "LSTM",
+      "hybrid": "XGBoost"
+    }
+  },
+  "closed_loop_mean": {
+    "FAP-Scale": {
+      "sla_violations": 52.25,
+      "sla_violation_percent": 4.047,
+      "unserved_percent": 1.212,
+      "overprovisioning_percent": 44.58,
+      "avg_replicas": 12.438,
+      "replicas_lost": 0.25,
+      "unhealthy_placements": 4.6,
+      "placements": 710.3,
+      "drained": 0.5
+    },
+    "Reactive-HPA": {
+      "sla_violations": 70.3,
+      "sla_violation_percent": 5.445,
+      "unserved_percent": 1.152,
+      "overprovisioning_percent": 51.61,
+      "avg_replicas": 14.186,
+      "replicas_lost": 1.75,
+      "unhealthy_placements": 10.65,
+      "placements": 448.5,
+      "drained": 0.0
+    },
+    "LSTM-RoundRobin": {
+      "sla_violations": 100.4,
+      "sla_violation_percent": 7.777,
+      "unserved_percent": 2.277,
+      "overprovisioning_percent": 40.17,
+      "avg_replicas": 11.506,
+      "replicas_lost": 1.25,
+      "unhealthy_placements": 14.4,
+      "placements": 534.1,
+      "drained": 0.0
+    }
+  },
+  "fap_at_least_as_good_on_draws": {
+    "sla_violations vs Reactive-HPA": "20/20",
+    "sla_violations vs LSTM-RoundRobin": "20/20",
+    "overprovisioning_percent vs Reactive-HPA": "20/20",
+    "overprovisioning_percent vs LSTM-RoundRobin": "0/20",
+    "unhealthy_placements vs Reactive-HPA": "19/20",
+    "unhealthy_placements vs LSTM-RoundRobin": "19/20",
+    "replicas_lost vs Reactive-HPA": "19/20",
+    "replicas_lost vs LSTM-RoundRobin": "18/20"
+  },
+  "sla_violation_percent_at_equal_cost": {
+    "at Reactive-HPA's cost": {
+      "avg_replicas": 14.19,
+      "FAP-Scale": 2.03,
+      "Reactive-HPA": 5.42,
+      "LSTM-RoundRobin": 2.97
+    },
+    "at LSTM-RoundRobin's cost": {
+      "avg_replicas": 11.51,
+      "FAP-Scale": 6.38,
+      "Reactive-HPA": 12.16,
+      "LSTM-RoundRobin": 7.71
+    }
+  }
+}

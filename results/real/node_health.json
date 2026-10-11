@@ -1,0 +1,73 @@
+{
+  "test_drives": 1021,
+  "test_failed_drives": 173,
+  "test_drive_days": 55037,
+  "positive_drive_days": 894,
+  "roc_auc": 0.8907040065125409,
+  "pr_auc_sample": 0.2022980005565952,
+  "pr_auc_fleet": 0.05454227682659835,
+  "gate": 0.02749578035566546,
+  "recall_drive_days": 0.7181208053691275,
+  "false_alarm_drive_days": 0.048280319649012846,
+  "precision_sample": 0.20663018989378823,
+  "precision_fleet": 0.003115617558753494,
+  "failed_drives_with_warning_window": 162,
+  "failed_drives_caught": 0.7901234567901234,
+  "median_lead_days": 19.0,
+  "healthy_drives_ever_flagged": 0.08608490566037735,
+  "error_counters_nonzero_day_before_failure": 0.7142857142857143,
+  "error_counters_nonzero_healthy": 0.06081557505484174,
+  "operating_points": [
+    {
+      "false_alarm_budget": 0.01,
+      "gate": 0.0997044061476651,
+      "failing_drives_flagged": 0.6296296296296297,
+      "healthy_drive_days_flagged": 0.013573331244124099,
+      "healthy_drives_ever_flagged": 0.02358490566037736
+    },
+    {
+      "false_alarm_budget": 0.02,
+      "gate": 0.06756526957791557,
+      "failing_drives_flagged": 0.691358024691358,
+      "healthy_drive_days_flagged": 0.019468818552178,
+      "healthy_drives_ever_flagged": 0.031839622641509434
+    },
+    {
+      "false_alarm_budget": 0.05,
+      "gate": 0.02749578035566546,
+      "failing_drives_flagged": 0.7901234567901234,
+      "healthy_drive_days_flagged": 0.048280319649012846,
+      "healthy_drives_ever_flagged": 0.08608490566037735
+    },
+    {
+      "false_alarm_budget": 0.1,
+      "gate": 0.013423852295885844,
+      "failing_drives_flagged": 0.8148148148148148,
+      "healthy_drive_days_flagged": 0.09133108743340645,
+      "healthy_drives_ever_flagged": 0.14976415094339623
+    }
+  ],
+  "train_drives": 3060,
+  "train_drive_days": 164898,
+  "calibration_drives": 1020,
+  "features": [
+    "temperature_c",
+    "tts",
+    "power_on_years",
+    "disk_health",
+    "log_realloc_sectors",
+    "log_pending_sectors",
+    "log_offline_uncorrectable",
+    "log_reported_uncorrectable",
+    "log_command_timeouts",
+    "log_crc_errors",
+    "realloc_sectors_delta",
+    "pending_sectors_delta",
+    "offline_uncorrectable_delta",
+    "reported_uncorrectable_delta",
+    "command_timeouts_delta",
+    "crc_errors_delta"
+  ],
+  "horizon_days": 7,
+  "dataset": "Backblaze Drive Stats Q2_2026 (2026-05-01 to 2026-06-30)"
+}
