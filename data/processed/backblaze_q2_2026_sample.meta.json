@@ -1,0 +1,33 @@
+{
+  "source": "Backblaze Drive Stats",
+  "quarter": "Q2_2026",
+  "archive_url": "https://f001.backblazeb2.com/file/Backblaze-Hard-Drive-Data/data_Q2_2026.zip",
+  "source_page": "https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data",
+  "first_day": "2026-05-01",
+  "last_day": "2026-06-30",
+  "days": 61,
+  "fleet_size_last_day": 355238,
+  "drive_days_scanned": 21537057,
+  "failed_drives": 862,
+  "healthy_drives_sampled": 4239,
+  "healthy_sample_rate": 0.012,
+  "rows": 276416,
+  "columns": [
+    "drive_id",
+    "date",
+    "model",
+    "failure",
+    "datacenter",
+    "vault_id",
+    "pod_id",
+    "realloc_sectors",
+    "power_on_hours",
+    "reported_uncorrectable",
+    "command_timeouts",
+    "temperature_c",
+    "pending_sectors",
+    "offline_uncorrectable",
+    "crc_errors",
+    "will_fail"
+  ]
+}
