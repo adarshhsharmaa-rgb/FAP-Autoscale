@@ -10,8 +10,10 @@ of past load and returns a dict:
     forecast_lstm     2-layer LSTM (64 units, drop .2) -> bursty workloads
     forecast_xgboost  XGBoost, robust lags + Fourier   -> hybrid workloads
 
-If a library is missing the function degrades to a lighter model and says so in
-"backend", so the demo never crashes on a teammate's laptop.
+The LSTM runs on whichever deep-learning library is installed, Keras
+(TensorFlow) or PyTorch, with the same architecture either way. If a library
+is missing the function degrades to a lighter model and says so in "backend",
+so the demo never crashes on a teammate's laptop.
 """
 from __future__ import annotations
 
@@ -24,7 +26,9 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")  # silences oneDNN banner
 
 ARTIFACT_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
-LSTM_PATH = os.path.join(ARTIFACT_DIR, "lstm_bursty.keras")
+LSTM_PATH = os.path.join(ARTIFACT_DIR, "lstm_bursty.keras")      # Keras, synthetic bursty series
+LSTM_TORCH_PATH = os.path.join(ARTIFACT_DIR, "lstm_bursty.pt")   # PyTorch, same training data
+LSTM_REAL_PATH = os.path.join(ARTIFACT_DIR, "lstm_gentd26.pt")   # PyTorch, GenTD26 request log
 LOOKBACK = 24          # LSTM / XGBoost input length (24 control steps)
 ARIMA_ORDER = (2, 1, 2)
 ARIMA_MAX_HISTORY = 120  # fitting on the last 120 points keeps ARIMA fast
@@ -88,11 +92,15 @@ def forecast_arima(window, horizon: int = 1, seasonal: bool = True) -> dict:
 
 # =========================================================================== #
 # 2) LSTM  -- bursty
-# Trained once on synthetic bursty series (z-scored per series), cached to disk,
-# then optionally fine-tuned on the live window ("fine-tuned online").
+# Trained once on z-scored series, cached to disk, then optionally fine-tuned
+# on the live window ("fine-tuned online"). Two training sets exist:
+#   lstm_bursty.*    synthetic bursty series (the original Review-2 artifact)
+#   lstm_gentd26.pt  windows of the real GenTD26 request log (models/train_real.py)
 # =========================================================================== #
 _LSTM = None
 _LSTM_BACKEND = None
+KERAS_NAME = "Keras LSTM 2x64 (dropout 0.2)"
+TORCH_NAME = "PyTorch LSTM 2x64 (dropout 0.2)"
 
 
 def _make_supervised(z, lookback=LOOKBACK):
@@ -120,51 +128,154 @@ def _build_keras_lstm():
     return model
 
 
-def train_lstm(n_series: int = 60, epochs: int = 8, seed: int = 11, verbose: int = 0):
-    """Pre-train the bursty-workload LSTM on synthetic data and save it."""
+def _build_torch_lstm():
+    """Same network as the Keras one: LSTM(64) -> drop -> LSTM(64) -> drop -> Dense(1)."""
+    from torch import nn
+
+    class LoadLSTM(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lstm = nn.LSTM(1, 64, num_layers=2, dropout=0.2, batch_first=True)
+            self.drop = nn.Dropout(0.2)
+            self.head = nn.Linear(64, 1)
+
+        def forward(self, x):                      # x: [batch, LOOKBACK, 1]
+            out, _ = self.lstm(x)
+            return self.head(self.drop(out[:, -1, :])).squeeze(-1)
+
+    return LoadLSTM()
+
+
+def _fit_torch(model, X, y, epochs, batch_size=128, lr=1e-3, seed=11, verbose=0):
+    import torch
+    Xt = torch.tensor(np.ascontiguousarray(X), dtype=torch.float32).unsqueeze(-1)
+    yt = torch.tensor(np.ascontiguousarray(y), dtype=torch.float32)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = torch.nn.HuberLoss()
+    gen = torch.Generator().manual_seed(seed)
+    model.train()
+    for epoch in range(epochs):
+        order = torch.randperm(len(Xt), generator=gen)
+        total = 0.0
+        for i in range(0, len(order), batch_size):
+            idx = order[i:i + batch_size]
+            opt.zero_grad()
+            loss = loss_fn(model(Xt[idx]), yt[idx])
+            loss.backward()
+            opt.step()
+            total += loss.item() * len(idx)
+        if verbose:
+            print(f"    epoch {epoch + 1}/{epochs}  huber={total / len(Xt):.4f}")
+    model.eval()
+    return model
+
+
+def _is_torch(model) -> bool:
+    return hasattr(model, "lstm") and hasattr(model, "state_dict")
+
+
+def _synthetic_bursty(n_series, seed):
     from data_gen.synthetic_data import generate_workload_series
     rng = np.random.default_rng(seed)
-    Xs, ys = [], []
-    for _ in range(n_series):
-        z, _, _ = _zscore(generate_workload_series("bursty", 200, seed=int(rng.integers(1e9))))
-        X, y = _make_supervised(z)
-        Xs.append(X)
-        ys.append(y)
-    X, y = np.vstack(Xs), np.concatenate(ys)
+    return [generate_workload_series("bursty", 200, seed=int(rng.integers(1e9)))
+            for _ in range(n_series)]
 
+
+def train_lstm(n_series: int = 60, epochs: int = 8, seed: int = 11, verbose: int = 0,
+               series=None, save_path=None):
+    """
+    Train the load LSTM and save it.
+
+    series : list of 1-D load arrays to learn from. Each is z-scored on its
+             own, so only the shape of a series matters, not its scale.
+             Defaults to synthetic bursty series (the original artifact).
+    """
+    if series is None:
+        series = _synthetic_bursty(n_series, seed)
+    Xs, ys = [], []
+    for one in series:
+        z, _, _ = _zscore(np.asarray(one, dtype=float))
+        if len(z) > LOOKBACK + 1:
+            X, y = _make_supervised(z)
+            Xs.append(X)
+            ys.append(y)
+    X, y = np.vstack(Xs), np.concatenate(ys)
+    os.makedirs(ARTIFACT_DIR, exist_ok=True)
+
+    if save_path is None or save_path.endswith(".keras"):
+        try:
+            import tensorflow as tf
+            tf.random.set_seed(seed)
+            model = _build_keras_lstm()
+            model.fit(X[..., None], y, epochs=epochs, batch_size=128, verbose=verbose,
+                      validation_split=0.1)
+            model.save(save_path or LSTM_PATH)
+            return model, KERAS_NAME
+        except ImportError:
+            pass
     try:
-        import tensorflow as tf
-        tf.random.set_seed(seed)
-        model = _build_keras_lstm()
-        model.fit(X[..., None], y, epochs=epochs, batch_size=128, verbose=verbose,
-                  validation_split=0.1)
-        os.makedirs(ARTIFACT_DIR, exist_ok=True)
-        model.save(LSTM_PATH)
-        return model, "Keras LSTM 2x64 (dropout 0.2)"
+        import torch
+        torch.manual_seed(seed)
+        model = _fit_torch(_build_torch_lstm(), X, y, epochs, seed=seed, verbose=verbose)
+        path = save_path if save_path and save_path.endswith(".pt") else LSTM_TORCH_PATH
+        torch.save(model.state_dict(), path)
+        return model, TORCH_NAME
     except ImportError:
         from sklearn.neural_network import MLPRegressor
         model = MLPRegressor(hidden_layer_sizes=(64, 64), max_iter=300, random_state=seed)
         model.fit(X, y)
-        return model, "MLP 'LSTM-lite' (TensorFlow not installed)"
+        return model, "MLP 'LSTM-lite' (neither TensorFlow nor PyTorch installed)"
+
+
+def _load_torch(path):
+    import torch
+    model = _build_torch_lstm()
+    model.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
+    model.eval()
+    return model
+
+
+def use_lstm(path: str, label: str = "") -> str:
+    """Make the PyTorch LSTM saved at `path` the active one (e.g. LSTM_REAL_PATH)."""
+    global _LSTM, _LSTM_BACKEND
+    _LSTM = _load_torch(path)
+    _LSTM_BACKEND = TORCH_NAME + (f", {label}" if label else "")
+    return _LSTM_BACKEND
+
+
+def reset_lstm() -> None:
+    """Forget the active LSTM so the next call reloads the default artifact."""
+    global _LSTM, _LSTM_BACKEND
+    _LSTM = _LSTM_BACKEND = None
 
 
 def get_lstm():
-    """Load cached LSTM from disk, or train it on first use."""
+    """Return the active LSTM: load a cached artifact, or train on first use."""
     global _LSTM, _LSTM_BACKEND
     if _LSTM is None:
         try:
             if os.path.exists(LSTM_PATH):
                 from tensorflow import keras
                 _LSTM = keras.models.load_model(LSTM_PATH)
-                _LSTM_BACKEND = "Keras LSTM 2x64 (dropout 0.2)"
+                _LSTM_BACKEND = KERAS_NAME
         except ImportError:
             pass
+        if _LSTM is None and os.path.exists(LSTM_TORCH_PATH):
+            try:
+                _LSTM, _LSTM_BACKEND = _load_torch(LSTM_TORCH_PATH), TORCH_NAME
+            except ImportError:
+                pass
         if _LSTM is None:
             _LSTM, _LSTM_BACKEND = train_lstm()
     return _LSTM, _LSTM_BACKEND
 
 
 def _lstm_predict_one(model, ctx):
+    if _is_torch(model):
+        import torch
+        with torch.no_grad():
+            x = torch.tensor(ctx, dtype=torch.float32).reshape(1, LOOKBACK, 1)
+            return float(model(x)[0])
     if hasattr(model, "predict") and hasattr(model, "layers"):  # keras
         return float(model(ctx.reshape(1, LOOKBACK, 1), training=False).numpy()[0, 0])
     return float(model.predict(ctx.reshape(1, -1))[0])
@@ -175,10 +286,14 @@ def forecast_lstm(window, horizon: int = 1, fine_tune_epochs: int = 0) -> dict:
     model, backend = get_lstm()
     z, mu, sd = _zscore(x)
 
-    if fine_tune_epochs > 0 and "Keras" in backend and len(z) > LOOKBACK + 8:
+    if fine_tune_epochs > 0 and len(z) > LOOKBACK + 8:
         X, y = _make_supervised(z)
-        model.fit(X[..., None], y, epochs=fine_tune_epochs, batch_size=32, verbose=0)
-        backend += " + online fine-tune"
+        if _is_torch(model):
+            _fit_torch(model, X, y, fine_tune_epochs, batch_size=32)
+            backend += " + online fine-tune"
+        elif "Keras" in backend:
+            model.fit(X[..., None], y, epochs=fine_tune_epochs, batch_size=32, verbose=0)
+            backend += " + online fine-tune"
 
     ctx = z[-LOOKBACK:].copy()
     preds = []
